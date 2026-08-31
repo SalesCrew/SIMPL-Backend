@@ -44,21 +44,19 @@ async function account(home: string, role = "mitarbeiter") {
   const user: Account = { id, email, password, token: "", db: client() };
   users.push(user);
   result(
-    await root
-      .from("profiles")
-      .insert({
-        id,
-        email,
-        name:
-          role === "admin"
-            ? "Isolation QA Admin"
-            : `Isolation QA Team ${users.length - 1}`,
-        role,
-        default_workspace_id: home,
-        default_column_id: null,
-        active: true,
-        color: "sage",
-      }),
+    await root.from("profiles").insert({
+      id,
+      email,
+      name:
+        role === "admin"
+          ? "Isolation QA Admin"
+          : `Isolation QA Team ${users.length - 1}`,
+      role,
+      default_workspace_id: home,
+      default_column_id: null,
+      active: true,
+      color: "sage",
+    }),
   );
   user.token = result(
     await user.db.auth.signInWithPassword({ email, password }),
@@ -67,7 +65,7 @@ async function account(home: string, role = "mitarbeiter") {
 }
 async function api(
   user: Account,
-  method: "post" | "delete",
+  method: "post" | "delete" | "get",
   path: string,
   body?: object,
   expected = 200,
@@ -213,7 +211,7 @@ try {
       }),
   );
   await api(b, "post", `/attachments/${ready.id}/complete`);
-  result(await a.db.storage.from(BUCKET).download(ready.object_path));
+  await api(a, "get", `/attachments/${ready.id}/download`);
   const pending = await api(
     a,
     "post",
@@ -389,12 +387,10 @@ try {
   );
   assert.ok(
     (
-      await a.db
-        .schema("private")
-        .rpc("user_can_access_workspace", {
-          p_user: admin.id,
-          p_workspace: wb.id,
-        })
+      await a.db.schema("private").rpc("user_can_access_workspace", {
+        p_user: admin.id,
+        p_workspace: wb.id,
+      })
     ).error,
   );
   result(
@@ -420,6 +416,7 @@ try {
   assert.ok(
     (await a.db.storage.from(BUCKET).download(ready.object_path)).error,
   );
+  await api(a, "get", `/attachments/${ready.id}/download`, undefined, 404);
   assert.ok(
     (
       await a.db.storage
@@ -449,7 +446,10 @@ try {
     "Hidden delete must be a no-op",
   );
   await api(a, "delete", `/cards/${cb.id}`, undefined, 404);
-  result(await admin.db.storage.from(BUCKET).download(ready.object_path));
+  await api(admin, "get", `/attachments/${ready.id}/download`);
+  assert.ok(
+    (await admin.db.storage.from(BUCKET).download(ready.object_path)).error,
+  );
   assert.equal(
     result(await admin.db.from("attachments").select("*").eq("id", pending.id))
       .length,

@@ -22,4 +22,6 @@ Supabase migrations are versioned in `supabase/migrations/`. They have already b
 
 Set `TEST_API_URL` to the API origin for `npm run test:integration`, or `TEST_ATTACHMENT_API_URL` for `npm run test:attachments`. These create and remove only temporary verification fixtures. Other verification scripts are in `scripts/` and transactional SQL checks in `sql/`.
 
-The companion UI is [SIMPL-Frontend](https://github.com/SalesCrew/SIMPL-Frontend). It uses authenticated Supabase/RLS for board data and this API for privileged account and attachment operations.
+The companion UI is [SIMPL-Frontend](https://github.com/SalesCrew/SIMPL-Frontend), live at https://simpl-salescrew.vercel.app. The API is https://simpl-backend-production.up.railway.app. Both deploy from their GitHub `main` branch.
+
+Board data uses authenticated Supabase/RLS. File downloads use `GET /api/attachments/:id/download`: each request verifies the login, active profile and live attachment RLS before streaming server-only Storage bytes. Responses disable caching and support single byte ranges without buffering 500 MB in the API. Clients have no Storage SELECT permission (including metadata/HEAD, which the CDN can use to authorize byte responses). Uploads still go directly to Storage through reservation-scoped INSERT RLS. Do not restore direct client downloads or signed links: CDN authorization can outlive workspace/profile changes. Previously saved copies cannot be recalled.
