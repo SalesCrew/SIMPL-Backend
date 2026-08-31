@@ -30,6 +30,16 @@ Run `npx tsx scripts/verify-initial-password.ts` to test both roles against Supa
 
 ## Live verification
 
+### Immediate card moves
+
+`POST /api/cards/:id/move` accepts `{ column_id, before_id? }` after account/password validation. It uses the caller's JWT with `move_card_with_receipt`, an invoker-rights wrapper around the existing atomic move RPC. The same transaction returns every rebalanced destination card, including revisions and return-location metadata. Workspace RLS, archive locks, completion rules and original project identity are unchanged.
+
+The frontend renders an optimistic position immediately, without a global loading state, and merges the receipt instead of awaiting a full board reload. Polling cannot overwrite pending positions; failed requests remove only their own overlay and reconcile with the server. A second drag of the same card is briefly disabled until its first save settles; other cards stay interactive. Later edits/completion wait for that move so their snapshots preserve ordering.
+
+The tiny move request uses browser `keepalive`. Once the server receives/authenticates it, its database operation is independent of client disconnects. This is not an offline queue or a promise to survive server/process failure: a request that never reaches the server cannot be saved. Do not automatically retry ambiguous network failures, which could reorder newer moves.
+
+`npx tsx scripts/verify-card-moves.ts` exercises the real API/database using disposable projects, cards and an account, then removes them. `TEST_API_URL` targets production. Unit tests also disconnect a real HTTP socket while the database operation is pending and verify that it finishes.
+
 Set `TEST_API_URL` to the API origin for `npm run test:integration`, or `TEST_ATTACHMENT_API_URL` for `npm run test:attachments`. These create and remove only temporary verification fixtures. Other verification scripts are in `scripts/` and transactional SQL checks in `sql/`.
 
 The companion UI is [SIMPL-Frontend](https://github.com/SalesCrew/SIMPL-Frontend), live at https://get-simpl.vercel.app. The API is https://simpl-backend-production.up.railway.app. Both deploy from their GitHub `main` branch.

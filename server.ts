@@ -22,6 +22,7 @@ import {
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { changeInitialPassword } from "./src/initial-password.js";
+import { moveCard } from "./src/card-moves.js";
 import {
   attachmentRouter,
   AttachmentError,
@@ -159,6 +160,7 @@ app.use("/api/users", memberOnly, (_req, res, next) => {
 app.use("/api/attachments", memberOnly, attachmentRouter);
 app.delete("/api/cards/:id", memberOnly, deleteCardWithAttachments);
 app.post("/api/cards/:id/cleanup", memberOnly, cleanupCardEdits);
+app.post("/api/cards/:id/move", memberOnly, moveCard);
 async function validProject(
   admin: SupabaseClient,
   id: string | null,
