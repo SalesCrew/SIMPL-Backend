@@ -5,6 +5,17 @@ validated checklist state. The migration ledger is in a private, unexposed
 database schema; exports, source files, account lists and credentials must never
 be committed to this public repository.
 
+Archived source cards without a single original project retain `project_id=null`
+and their original labels. Active cards still require a real project. Archive
+comments and files are read-only through RLS and server upload/delete routes.
+
+The one-time staged import suspends only history-rewriting triggers inside one
+transaction. Foreign keys, check constraints and workspace validators stay on.
+It compares every imported field before commit and restores all triggers. The
+private staging payload is replaced by an audit ledger; no public import API or
+credential bypass is installed. File paths follow the generated database path,
+and the original files are checksum-verified after upload.
+
 ## Verification
 
 - Frontend: 192 tests; production build passes.

@@ -12,6 +12,7 @@ const admin = createClient(url,process.env.SUPABASE_SECRET_KEY!,options);
 const api = process.env.TEST_API_URL || app;
 const actors: string[] = [];
 const cardIds: string[] = [];
+let testProjectId: string | null = null;
 const checked = <R extends {data:unknown;error:unknown}>(result:R):NonNullable<R["data"]> => {
   if(result.error)throw result.error;
   assert.notEqual(result.data,null);
@@ -20,7 +21,10 @@ const checked = <R extends {data:unknown;error:unknown}>(result:R):NonNullable<R
 try {
   const workspace = checked(await admin.from("workspaces").select("id").eq("name","Development").single());
   const columns = checked(await admin.from("columns").select("id,kind").eq("workspace_id",workspace.id));
-  const project = columns.find(column => column.kind === "project")!.id;
+  // Never use a real project: moving fixtures renumbers every card in a column.
+  // Keep even post-import regression tests isolated from customer timestamps.
+  testProjectId = checked(await admin.from("columns").insert({workspace_id:workspace.id,name:`QA import ${randomUUID()}`,kind:"project",color:"slate",position:columns.length}).select("id").single()).id;
+  const project = testProjectId;
   for(const role of ["admin","mitarbeiter"]){
     const email = `qa-import-foundation-${randomUUID()}@example.invalid`;
     const temporary = randomBytes(24).toString("base64url")+"Aa8!";
@@ -56,6 +60,13 @@ try {
     assert.equal(deniedArchive.error?.code,"42501");
     const directArchive=await client.from("cards").update({title:"Forbidden archive overwrite"}).eq("id",ids[1]).select("id");
     assert.ok(directArchive.error || directArchive.data?.length===0);
+    const archiveComment=await client.from("comments").insert({card_id:ids[1],body:"Forbidden archive comment"});
+    assert.ok(archiveComment.error,"Archive comments must be read-only");
+    const activeWithoutProject=await client.from("cards").insert({title:"Forbidden missing project",column_id:project,project_id:null});
+    assert.ok(activeWithoutProject.error,"Active cards still require a project");
+    const token=checked(await client.auth.getSession()).session!.access_token;
+    const archiveUpload=await request(api).post("/api/attachments").set("Authorization",`Bearer ${token}`).send({card_id:ids[1],filename:"test.png",size_bytes:70});
+    assert.equal(archiveUpload.status,409,"Server must reject archive uploads before service-role writes");
     const knownSession=randomUUID();
     checked(await client.rpc("card_edit_session",{p_session:knownSession,p_operation:"begin",p_card:ids[0]}));
     const beforeReset=checked(await admin.from("cards").select("*").in("id",ids).order("id"));
@@ -77,5 +88,6 @@ try {
 } finally {
   if(cardIds.length)assert.ifError((await admin.from("cards").delete().in("id",cardIds)).error);
   for(const id of actors)assert.ifError((await admin.auth.admin.deleteUser(id)).error);
+  if(testProjectId)assert.ifError((await admin.from("columns").delete().eq("id",testProjectId)).error);
 }
-console.log("PASS: all disposable cards/accounts removed; requested user accounts unchanged.");
+console.log("PASS: disposable project/cards/accounts removed; real cards and requested user accounts unchanged.");

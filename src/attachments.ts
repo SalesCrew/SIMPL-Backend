@@ -114,11 +114,13 @@ export async function cleanupCardEdits(
 async function visibleCard(user: SupabaseClient, id: string) {
   const { data, error } = await user
     .from("cards")
-    .select("id")
+    .select("id,archived_at")
     .eq("id", id)
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new AttachmentError(404, "Die Karte wurde nicht gefunden.");
+  if (data.archived_at)
+    throw new AttachmentError(409, "Archivierte Karten können nicht geändert werden.");
 }
 export const attachmentRouter = Router();
 // Always authorize through live table RLS before touching server-only Storage.
