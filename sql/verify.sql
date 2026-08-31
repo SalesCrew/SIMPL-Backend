@@ -14,10 +14,12 @@ insert into public.cards(id,title,column_id,project_id,created_by,assignee_id) v
 do $$ begin
   if (select count(*) from public.columns) <> 6 then raise exception 'Members must see all six columns'; end if;
   if (select created_by from public.cards where id='20000000-0000-4000-8000-000000000001') <> '10000000-0000-4000-8000-000000000002' then raise exception 'Creator spoofing'; end if;
-  begin
-    update public.cards set reviewed_at=now() where id='20000000-0000-4000-8000-000000000001';
-    raise exception 'FAIL employee review accepted';
-  exception when others then if sqlerrm like 'FAIL%' then raise; end if; end;
+  update public.cards set reviewed_at=now(),reviewed_by='10000000-0000-4000-8000-000000000001'
+    where id='20000000-0000-4000-8000-000000000001';
+  if (select reviewed_by from public.cards where id='20000000-0000-4000-8000-000000000001') <> auth.uid() then
+    raise exception 'Acknowledgement actor spoofing';
+  end if;
+  update public.cards set reviewed_at=null where id='20000000-0000-4000-8000-000000000001';
   begin
     update public.profiles set role='admin' where id=auth.uid();
     raise exception 'FAIL role escalation accepted';
@@ -96,5 +98,5 @@ do $$ begin
   exception when insufficient_privilege then null; end;
 end $$;
 reset role;
-select 'PASS: fixed bucket protection against admin edits/deletion/duplication/conversion, project-only creation, editable projects, shared visibility, immutable creator/project, completion, admin read receipts, notification delivery/isolation/seen, role escalation denial, inactive and unprovisioned denial, anonymous denial' as verification;
+select 'PASS: fixed bucket protection against admin edits/deletion/duplication/conversion, project-only creation, editable projects, shared visibility, immutable creator/project, completion, all-role acknowledgements, notification delivery/isolation/seen, role escalation denial, inactive and unprovisioned denial, anonymous denial' as verification;
 rollback;

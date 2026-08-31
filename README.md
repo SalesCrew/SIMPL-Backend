@@ -18,6 +18,8 @@ Keep `SUPABASE_SECRET_KEY` server-only. It must never appear in Git, frontend va
 
 Supabase migrations are versioned in `supabase/migrations/`. They have already been applied to the existing project; do not reapply historical migrations or reset production to deploy this API.
 
+Card acknowledgement (`reviewed_at` / `reviewed_by`, shown as “Karte wurde wahrgenommen”) is shared state. Every active role with workspace access can toggle it via direct card updates or edit sessions. The database supplies the actor and timestamp; workspace restrictions and session ownership remain enforced. `sql/verify-card-acknowledgements.sql` checks both roles and denial cases using rolled-back fixtures.
+
 ## Live verification
 
 Set `TEST_API_URL` to the API origin for `npm run test:integration`, or `TEST_ATTACHMENT_API_URL` for `npm run test:attachments`. These create and remove only temporary verification fixtures. Other verification scripts are in `scripts/` and transactional SQL checks in `sql/`.

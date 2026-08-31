@@ -212,16 +212,44 @@ try {
   );
   const employeeReview = await b
     .from("cards")
-    .update({ reviewed_at: new Date().toISOString() })
-    .eq("id", cardId);
-  assert.ok(employeeReview.error);
+    .update({ reviewed_at: "2000-01-01T00:00:00.000Z", reviewed_by: aId })
+    .eq("id", cardId)
+    .select("reviewed_at,reviewed_by")
+    .single();
+  assert.ifError(employeeReview.error);
+  assert.equal(employeeReview.data.reviewed_by, createdB.data.id);
+  assert.ok(new Date(employeeReview.data.reviewed_at).getFullYear() > 2000);
   const adminReview = await a
     .from("cards")
     .update({ reviewed_at: new Date().toISOString() })
-    .eq("id", cardId);
+    .eq("id", cardId)
+    .select("reviewed_at,reviewed_by")
+    .single();
   assert.ifError(adminReview.error);
+  assert.equal(adminReview.data.reviewed_by, aId);
+  const sessionId = randomUUID();
+  assert.ifError((await b.rpc("card_edit_session", {
+    p_session: sessionId, p_operation: "begin", p_card: cardId,
+  })).error);
+  assert.ifError((await b.rpc("card_edit_session", {
+    p_session: sessionId, p_operation: "mutate", p_card: cardId,
+    p_action: { type: "card.review", id: cardId, reviewed: false },
+  })).error);
+  const clearedReview = await b.from("cards").select("reviewed_at,reviewed_by").eq("id", cardId).single();
+  assert.ifError(clearedReview.error);
+  assert.equal(clearedReview.data.reviewed_at, null);
+  assert.equal(clearedReview.data.reviewed_by, null);
+  assert.ifError((await b.rpc("card_edit_session", {
+    p_session: sessionId, p_operation: "close", p_card: cardId,
+  })).error);
+  assert.ifError((await b.rpc("card_edit_session", {
+    p_session: sessionId, p_operation: "undo", p_card: cardId,
+  })).error);
+  const restoredReview = await b.from("cards").select("reviewed_at,reviewed_by").eq("id", cardId).single();
+  assert.ifError(restoredReview.error);
+  assert.deepEqual(restoredReview.data, adminReview.data);
   console.log(
-    "PASS: shared cards, custom labels, completion, stable project, admin-only read receipts",
+    "PASS: all-role acknowledgements via REST and sessions, server-owned actor/time, clear and undo",
   );
   let sawNotification = false;
   await b.realtime.setAuth(tokenB);

@@ -136,7 +136,7 @@ begin
       raise exception 'Creator and original project cannot be changed';
     end if;
     if new.reviewed_at is distinct from old.reviewed_at or new.reviewed_by is distinct from old.reviewed_by then
-      if not private.is_admin() then raise exception 'Only admins can mark cards as read'; end if;
+      if auth.uid() is null or not private.is_member() then raise exception 'Authentication required' using errcode = '42501'; end if;
       new.reviewed_by := case when new.reviewed_at is null then null else auth.uid() end;
       new.reviewed_at := case when new.reviewed_at is null then null else now() end;
     end if;
