@@ -321,7 +321,7 @@ try {
   assert.equal(complete.body.status, "ready");
   assert.equal(complete.body.mime_type, "application/octet-stream");
   assert.equal(
-    checked(await db.storage.from(BUCKET).info(target.object_path))!.size,
+    checked(await admin.storage.from(BUCKET).info(target.object_path))!.size,
     size,
   );
   // Authenticate and stream a small download range; do not buffer a 500 MB blob.
