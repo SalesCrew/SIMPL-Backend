@@ -210,10 +210,14 @@ try {
   );
   assert.equal(ready.status, "ready");
   await api(owner.token, "post", `/attachments/${image.id}/complete`);
-  assert.equal(
-    result(await teammate.db.storage.from(BUCKET).download(image.object_path))
-      .size,
-    png.length,
+  const downloaded = await request(process.env.TEST_ATTACHMENT_API_URL || app)
+    .get(`/api/attachments/${image.id}/download`)
+    .set("Authorization", `Bearer ${teammate.token}`);
+  assert.equal(downloaded.status, 200);
+  assert.equal(downloaded.body.length, png.length);
+  assert.match(downloaded.headers["cache-control"], /private.*no-store/);
+  assert.ok(
+    (await teammate.db.storage.from(BUCKET).download(image.object_path)).error,
   );
   assert.ok(
     (
@@ -253,6 +257,14 @@ try {
   );
   assert.ok(
     (await teammate.db.storage.from(BUCKET).download(image.object_path)).error,
+  );
+  assert.equal(
+    (
+      await request(process.env.TEST_ATTACHMENT_API_URL || app)
+        .get(`/api/attachments/${image.id}/download`)
+        .set("Authorization", `Bearer ${teammate.token}`)
+    ).status,
+    403,
   );
   await api(
     teammate.token,

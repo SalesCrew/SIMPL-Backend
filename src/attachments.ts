@@ -5,6 +5,9 @@ import {
   type NextFunction,
 } from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   MAX_PREVIEW_SIZE,
@@ -118,6 +121,77 @@ async function visibleCard(user: SupabaseClient, id: string) {
   if (!data) throw new AttachmentError(404, "Die Karte wurde nicht gefunden.");
 }
 export const attachmentRouter = Router();
+// Always authorize through live table RLS before touching server-only Storage.
+// Direct authenticated Storage downloads may reuse CDN authorization decisions.
+attachmentRouter.get("/:id/download", async (req, res, next) => {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  res.once("close", abort);
+  try {
+    const id = idSchema.parse(req.params.id);
+    const item = checked(
+      await (res.locals.user as SupabaseClient)
+        .from("attachments")
+        .select("object_path,filename,mime_type,size_bytes")
+        .eq("id", id)
+        .eq("status", "ready")
+        .maybeSingle(),
+    );
+    if (!item) throw new AttachmentError(404, "Anhang nicht gefunden.");
+    const range = req.headers.range;
+    if (range && !/^bytes=(?:\d+-\d*|-\d+)$/.test(range))
+      throw new AttachmentError(416, "Ungültiger Dateibereich.");
+    const url = process.env.SUPABASE_URL;
+    const secret = process.env.SUPABASE_SECRET_KEY;
+    if (!url || !secret) throw new Error("NOT_CONFIGURED");
+    const objectPath = item.object_path
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/");
+    const upstream = await fetch(
+      `${url}/storage/v1/object/authenticated/${BUCKET}/${objectPath}?cacheNonce=${randomUUID()}`,
+      {
+        headers: {
+          apikey: secret,
+          Authorization: `Bearer ${secret}`,
+          ...(range ? { Range: range } : {}),
+        },
+        cache: "no-store",
+        signal: controller.signal,
+      },
+    );
+    if (!upstream.ok || !upstream.body) {
+      await upstream.body?.cancel();
+      throw new AttachmentError(
+        upstream.status === 416 ? 416 : 502,
+        "Datei momentan nicht verfügbar.",
+      );
+    }
+    res.status(upstream.status);
+    res.attachment(item.filename);
+    res.setHeader("Content-Type", item.mime_type);
+    res.setHeader("Cache-Control", "private, no-store, max-age=0");
+    res.setHeader("CDN-Cache-Control", "no-store");
+    res.setHeader("Vercel-CDN-Cache-Control", "no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.vary("Authorization");
+    for (const header of ["content-length", "content-range", "accept-ranges"]) {
+      const value = upstream.headers.get(header);
+      if (value) res.setHeader(header, value);
+    }
+    // Backpressure keeps 500 MB downloads out of process memory; disconnects
+    // cancel the upstream stream rather than continuing a billable transfer.
+    await pipeline(
+      Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]),
+      res,
+    );
+  } catch (error) {
+    if (res.headersSent) res.destroy();
+    else if (!controller.signal.aborted) next(error);
+  } finally {
+    res.off("close", abort);
+  }
+});
 attachmentRouter.post("/", async (req, res, next) => {
   try {
     const input = inputSchema.parse(req.body);

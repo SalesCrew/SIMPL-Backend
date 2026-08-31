@@ -62,7 +62,7 @@ describe("Admin API access and validation", () => {
   it("provides health without exposing secrets", async () => {
     const r = await request(app).get("/api/health");
     expect(r.status).toBe(200);
-    expect(r.body).toMatchObject({ ok: true, service: "trello-plus-backend" });
+    expect(r.body).toMatchObject({ ok: true, service: "simpl-backend" });
     expect(r.headers["cache-control"]).toBe("no-store");
   });
   it("requires authentication before any admin mutation", async () => {
@@ -72,6 +72,12 @@ describe("Admin API access and validation", () => {
   it("requires authentication for card file cleanup", async () => {
     const r = await request(app).post(
       "/api/cards/00000000-0000-4000-8000-000000000001/cleanup",
+    );
+    expect(r.status).toBe(401);
+  });
+  it("requires authentication before streaming any file", async () => {
+    const r = await request(app).get(
+      "/api/attachments/00000000-0000-4000-8000-000000000001/download",
     );
     expect(r.status).toBe(401);
   });

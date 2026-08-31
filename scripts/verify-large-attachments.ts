@@ -325,18 +325,14 @@ try {
     size,
   );
   // Authenticate and stream a small download range; do not buffer a 500 MB blob.
-  const read = await fetch(
-    `${url}/storage/v1/object/authenticated/${BUCKET}/${target.object_path}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        apikey: key,
-        Range: "bytes=0-15",
-      },
-    },
-  );
+  const read = await request(process.env.TEST_ATTACHMENT_API_URL || app)
+    .get(`/api/attachments/${target.id}/download`)
+    .set("Authorization", `Bearer ${token}`)
+    .set("Range", "bytes=0-15");
   assert.equal(read.status, 206);
-  assert.deepEqual(Buffer.from(await read.arrayBuffer()), Buffer.alloc(16, 65));
+  assert.deepEqual(read.body, Buffer.alloc(16, 65));
+  assert.match(read.headers["cache-control"], /no-store/);
+  assert.ok((await db.storage.from(BUCKET).download(target.object_path)).error);
   const anonymous = await fetch(
     `${url}/storage/v1/object/authenticated/${BUCKET}/${target.object_path}`,
     { headers: { apikey: key, Range: "bytes=0-15" } },

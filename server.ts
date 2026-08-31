@@ -61,7 +61,8 @@ app.use(
       else callback(new Error("ORIGIN_DENIED"));
     },
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Authorization", "Content-Type"],
+    allowedHeaders: ["Authorization", "Content-Type", "Range"],
+    exposedHeaders: ["Content-Disposition", "Content-Range", "Accept-Ranges"],
   }),
 );
 app.use(express.json({ limit: "16kb" }));
@@ -72,7 +73,7 @@ app.use((_req, res, next) => {
 app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
-    service: "trello-plus-backend",
+    service: "simpl-backend",
     configured: Boolean(
       process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
     ),

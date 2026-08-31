@@ -11,6 +11,10 @@ import {
 } from "../src/attachments.js";
 
 const options = { auth: { persistSession: false, autoRefreshToken: false } };
+const download = (token: string, id: string) =>
+  request(process.env.TEST_ATTACHMENT_API_URL || app)
+    .get(`/api/attachments/${id}/download`)
+    .set("Authorization", `Bearer ${token}`);
 const root = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SECRET_KEY!,
@@ -51,18 +55,16 @@ async function account(provision = true) {
   users.push(id);
   if (provision)
     result(
-      await root
-        .from("profiles")
-        .insert({
-          id,
-          email,
-          name: "Comment files QA",
-          role: "mitarbeiter",
-          active: true,
-          color: "sage",
-          default_workspace_id: project.workspace_id,
-          default_column_id: project.id,
-        }),
+      await root.from("profiles").insert({
+        id,
+        email,
+        name: "Comment files QA",
+        role: "mitarbeiter",
+        active: true,
+        color: "sage",
+        default_workspace_id: project.workspace_id,
+        default_column_id: project.id,
+      }),
     );
   const db = client();
   const signed = result(await db.auth.signInWithPassword({ email, password }));
@@ -92,7 +94,9 @@ try {
   const card = await newCard(),
     otherCard = await newCard();
   async function upload(name: string, bytes: Buffer, cardId = card.id) {
-    const reservation = await request(process.env.TEST_ATTACHMENT_API_URL || app)
+    const reservation = await request(
+      process.env.TEST_ATTACHMENT_API_URL || app,
+    )
       .post("/api/attachments")
       .set("Authorization", "Bearer " + owner.token)
       .send({
@@ -104,9 +108,11 @@ try {
     assert.equal(reservation.status, 201, JSON.stringify(reservation.body));
     const item = reservation.body;
     result(
-      await owner.db.storage
-        .from(BUCKET)
-        .upload(item.object_path, bytes, { contentType: item.mime_type }),
+      await owner.db.storage.from(BUCKET).upload(item.object_path, bytes, {
+        contentType: item.mime_type,
+        // Match the real XHR uploader; the SDK default caches for one hour.
+        headers: { "Cache-Control": "no-store" },
+      }),
     );
     const complete = await request(process.env.TEST_ATTACHMENT_API_URL || app)
       .post(`/api/attachments/${item.id}/complete`)
@@ -138,7 +144,12 @@ try {
       (await viewer.storage.from(BUCKET).download(png.object_path)).error,
     );
   }
-  result(await owner.db.storage.from(BUCKET).download(png.object_path));
+  assert.equal((await download(owner.token, png.id)).status, 200);
+  assert.equal((await download(teammate.token, png.id)).status, 404);
+  assert.equal((await download(outsider.token, png.id)).status, 403);
+  assert.ok(
+    (await owner.db.storage.from(BUCKET).download(png.object_path)).error,
+  );
   pass("PNG, PDF, Excel and opaque files upload; unsent files are private");
   const insert = (
     db: typeof owner.db,
@@ -195,7 +206,15 @@ try {
     );
     assert.equal(metadata.comment_id, message.id);
     assert.equal(metadata.comment_draft_id, null);
-    result(await teammate.db.storage.from(BUCKET).download(file.object_path));
+    const read = await download(teammate.token, file.id);
+    assert.equal(read.status, 200);
+    assert.match(read.headers["cache-control"], /private.*no-store/);
+    assert.equal(read.headers["cdn-cache-control"], "no-store");
+    // No client token can bypass the API via direct Storage URLs.
+    assert.ok(
+      (await teammate.db.storage.from(BUCKET).download(file.object_path)).error,
+    );
+    assert.equal((await download(outsider.token, file.id)).status, 403);
     assert.ok(
       (await outsider.db.storage.from(BUCKET).download(file.object_path)).error,
     );
@@ -215,18 +234,39 @@ try {
   pass(
     "atomic attachment-only message, teammate downloads, notification and relink denial",
   );
-  const discardPublished = await request(process.env.TEST_ATTACHMENT_API_URL || app)
+  const discardPublished = await request(
+    process.env.TEST_ATTACHMENT_API_URL || app,
+  )
     .delete(`/api/attachments/${png.id}?draft=1`)
     .set("Authorization", "Bearer " + owner.token);
   assert.equal(discardPublished.status, 204);
-  result(await teammate.db.storage.from(BUCKET).download(png.object_path));
+  assert.equal((await download(teammate.token, png.id)).status, 200);
   pass("draft cleanup cannot remove a message file that was already published");
-  result(
-    await root.from("profiles").update({ active: false }).eq("id", teammate.id),
+  const deactivated = result(
+    await root
+      .from("profiles")
+      .update({ active: false })
+      .eq("id", teammate.id)
+      .select("id,active")
+      .single(),
   );
-  assert.ok(
-    (await teammate.db.storage.from(BUCKET).download(png.object_path)).error,
+  assert.equal(deactivated.active, false);
+  const revokedMetadata = await teammate.db
+    .from("attachments")
+    .select("id")
+    .eq("id", png.id);
+  assert.equal(revokedMetadata.error, null);
+  assert.equal(
+    revokedMetadata.data?.length ?? 0,
+    0,
+    "Revoked user still sees attachment metadata",
   );
+  for (let attempt = 0; attempt < 2; attempt++)
+    assert.equal(
+      (await download(teammate.token, png.id)).status,
+      403,
+      "Revoked user still downloads comment file bytes from a previously warmed URL",
+    );
   result(
     await root.from("profiles").update({ active: true }).eq("id", teammate.id),
   );
@@ -269,7 +309,9 @@ try {
   pass("expired ready drafts cannot be sent and are cleaned via Storage API");
   const draft = randomUUID();
   for (let i = 0; i < 11; i++) {
-    const reservation = await request(process.env.TEST_ATTACHMENT_API_URL || app)
+    const reservation = await request(
+      process.env.TEST_ATTACHMENT_API_URL || app,
+    )
       .post("/api/attachments")
       .set("Authorization", "Bearer " + owner.token)
       .send({
