@@ -1,0 +1,9 @@
+.env
+.env.*
+.attachments-qa.json
+.attachment-fixture.png
+.workspace-access-qa.json
+node_modules
+supabase/.temp
+coverage
+*.log

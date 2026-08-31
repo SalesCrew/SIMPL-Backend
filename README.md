@@ -1,0 +1,23 @@
+# SIMPL Backend
+
+Express + TypeScript API. Production hosting: Railway. Database, Auth, Realtime, and private file storage: the existing Supabase `Trello+` project.
+
+## Development and checks
+
+Use Node.js 22 or newer. Run `npm ci`, copy `.env.example` to `.env`, configure it, then `npm run dev`.
+
+`npm test` runs unit tests. `npm run build` type-checks and compiles the production server. `npm start` serves that build on `0.0.0.0:$PORT` (default 3001).
+
+## Railway
+
+Create a separate project from `SalesCrew/SIMPL-Backend`. `railway.json` defines the build, start, health check, and restart policy. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, and `FRONTEND_ORIGINS` as Railway service variables. `FRONTEND_ORIGINS` is a comma-separated exact allowlist of frontend origins. Railway supplies `PORT`.
+
+Keep `SUPABASE_SECRET_KEY` server-only. It must never appear in Git, frontend variables, logs, or client bundles. No database migration or data reset runs during build/start/deploy.
+
+Supabase migrations are versioned in `supabase/migrations/`. They have already been applied to the existing project; do not reapply historical migrations or reset production to deploy this API.
+
+## Live verification
+
+Set `TEST_API_URL` to the API origin for `npm run test:integration`, or `TEST_ATTACHMENT_API_URL` for `npm run test:attachments`. These create and remove only temporary verification fixtures. Other verification scripts are in `scripts/` and transactional SQL checks in `sql/`.
+
+The companion UI is [SIMPL-Frontend](https://github.com/SalesCrew/SIMPL-Frontend). It uses authenticated Supabase/RLS for board data and this API for privileged account and attachment operations.

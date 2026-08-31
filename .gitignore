@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+*.log
+.vercel/
+.env
+.env.*
+!.env.example
+supabase/.temp/
+.attachments-qa.json
+.attachment-fixture.png
+.workspace-access-qa.json
