@@ -18,7 +18,15 @@ Keep `SUPABASE_SECRET_KEY` server-only. It must never appear in Git, frontend va
 
 Supabase migrations are versioned in `supabase/migrations/`. They have already been applied to the existing project; do not reapply historical migrations or reset production to deploy this API.
 
-Card acknowledgement (`reviewed_at` / `reviewed_by`, shown as “Karte wurde wahrgenommen”) is shared state. Every active role with workspace access can toggle it via direct card updates or edit sessions. The database supplies the actor and timestamp; workspace restrictions and session ownership remain enforced. `sql/verify-card-acknowledgements.sql` checks both roles and denial cases using rolled-back fixtures.
+Card acknowledgement (`reviewed_at` / `reviewed_by`, shown as “Von [Name] gelesen”) is shared state. Every active role with workspace access can toggle it via direct card updates or edit sessions. The database supplies the actor and timestamp; workspace restrictions and session ownership remain enforced.
+
+## Mandatory initial password change
+
+Every new profile receives an `account_security` row requiring a password change. `account_access_context()` exposes only the caller's gate status before workspace loading. Clients cannot forge the completion stamp. Restrictive RLS gates all business tables, and the API checks the same access context, including for admins. Existing workspace isolation policies are preserved.
+
+`POST /api/account/initial-password` validates two matching 12–128-character passwords, changes the authenticated user's password through Supabase Auth, revokes old sessions, and records completion through a service-only operation. A short per-account lease prevents concurrent completion requests. Only a new Auth session created after the database timestamp can access data, so still-valid old JWTs remain blocked. Admin-set passwords re-enable this requirement.
+
+Run `npx tsx scripts/verify-initial-password.ts` to test both roles against Supabase using disposable accounts and the local Express app. Set `TEST_API_URL` to test the hosted API instead. This verifies pre-change RLS/API denial, unforgeable stamps, unchanged-password rejection, post-change access, old-token denial and reset behavior. Legacy hand-written SQL fixtures must model completed password setup and a real Auth session before expecting business access.
 
 ## Live verification
 

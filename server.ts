@@ -21,6 +21,7 @@ import {
 } from "helmet";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { changeInitialPassword } from "./src/initial-password.js";
 import {
   attachmentRouter,
   AttachmentError,
@@ -97,7 +98,7 @@ function clients(token: string) {
     }),
   };
 }
-async function memberOnly(req: Request, res: Response, next: NextFunction) {
+async function authenticatedAccount(req: Request, res: Response, next: NextFunction) {
   const match = req.headers.authorization?.match(/^Bearer (.+)$/);
   if (!match) {
     res.status(401).json({ error: "Bitte anmelden." });
@@ -112,7 +113,7 @@ async function memberOnly(req: Request, res: Response, next: NextFunction) {
         .json({ error: "Sitzung abgelaufen. Bitte erneut anmelden." });
       return;
     }
-    const profile = await user
+    const profile = await admin
       .from("profiles")
       .select("id,role,active")
       .eq("id", data.user.id)
@@ -125,11 +126,27 @@ async function memberOnly(req: Request, res: Response, next: NextFunction) {
     res.locals.admin = admin;
     res.locals.user = user;
     res.locals.role = profile.data.role;
+    res.locals.token = match[1];
     next();
   } catch (error) {
     next(error);
   }
 }
+async function memberOnly(req: Request, res: Response, next: NextFunction) {
+  await authenticatedAccount(req, res, async (error?: unknown) => {
+    if (error) return next(error);
+    try {
+      const context = await (res.locals.user as SupabaseClient).rpc("account_access_context");
+      if (context.error) throw context.error;
+      if (!context.data?.ready) {
+        res.status(403).json({ error: "Bitte zuerst dein Startpasswort ändern oder erneut anmelden.", code: "PASSWORD_CHANGE_REQUIRED" });
+        return;
+      }
+      next();
+    } catch (failure) { next(failure); }
+  });
+}
+app.post("/api/account/initial-password", authenticatedAccount, changeInitialPassword);
 app.use("/api/users", memberOnly, (_req, res, next) => {
   if (res.locals.role !== "admin") {
     res
@@ -261,6 +278,8 @@ app.patch("/api/users/:id", async (req, res, next) => {
       .single();
     if (updated.error) throw updated.error;
     if (password) {
+      const gate = await admin.rpc("require_password_change", { p_user: id });
+      if (gate.error) throw gate.error;
       const changed = await admin.auth.admin.updateUserById(id, { password });
       if (changed.error) {
         res.status(502).json({
