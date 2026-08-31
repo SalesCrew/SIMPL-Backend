@@ -80,7 +80,7 @@ try {
   )!;
   cards.push(card.id);
   const reserve = async (size: number, comment = false) => {
-    const response = await request(app)
+    const response = await request(process.env.TEST_ATTACHMENT_API_URL || app)
       .post("/api/attachments")
       .set("Authorization", `Bearer ${token}`)
       .send({
@@ -117,7 +117,7 @@ try {
       },
     });
   };
-  const over = await request(app)
+  const over = await request(process.env.TEST_ATTACHMENT_API_URL || app)
     .post("/api/attachments")
     .set("Authorization", `Bearer ${token}`)
     .send({
@@ -314,7 +314,7 @@ try {
   pass(
     "Pinned TUS client recovers a lost chunk acknowledgement and resumes from the server offset",
   );
-  const complete = await request(app)
+  const complete = await request(process.env.TEST_ATTACHMENT_API_URL || app)
     .post(`/api/attachments/${target.id}/complete`)
     .set("Authorization", `Bearer ${token}`);
   assert.equal(complete.status, 200, JSON.stringify(complete.body));

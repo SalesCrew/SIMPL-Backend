@@ -92,7 +92,7 @@ try {
   const card = await newCard(),
     otherCard = await newCard();
   async function upload(name: string, bytes: Buffer, cardId = card.id) {
-    const reservation = await request(app)
+    const reservation = await request(process.env.TEST_ATTACHMENT_API_URL || app)
       .post("/api/attachments")
       .set("Authorization", "Bearer " + owner.token)
       .send({
@@ -108,7 +108,7 @@ try {
         .from(BUCKET)
         .upload(item.object_path, bytes, { contentType: item.mime_type }),
     );
-    const complete = await request(app)
+    const complete = await request(process.env.TEST_ATTACHMENT_API_URL || app)
       .post(`/api/attachments/${item.id}/complete`)
       .set("Authorization", "Bearer " + owner.token);
     assert.equal(complete.status, 200, JSON.stringify(complete.body));
@@ -215,7 +215,7 @@ try {
   pass(
     "atomic attachment-only message, teammate downloads, notification and relink denial",
   );
-  const discardPublished = await request(app)
+  const discardPublished = await request(process.env.TEST_ATTACHMENT_API_URL || app)
     .delete(`/api/attachments/${png.id}?draft=1`)
     .set("Authorization", "Bearer " + owner.token);
   assert.equal(discardPublished.status, 204);
@@ -269,7 +269,7 @@ try {
   pass("expired ready drafts cannot be sent and are cleaned via Storage API");
   const draft = randomUUID();
   for (let i = 0; i < 11; i++) {
-    const reservation = await request(app)
+    const reservation = await request(process.env.TEST_ATTACHMENT_API_URL || app)
       .post("/api/attachments")
       .set("Authorization", "Bearer " + owner.token)
       .send({
