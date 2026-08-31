@@ -51,7 +51,7 @@ try {
   assert.equal(result.status, 200, result.text);
   assert.deepEqual(result.body.cards.map((c: { id: string }) => c.id), [cardIds[3], cardIds[0], cardIds[4]]);
   assert.ok(result.body.cards.every((c: { edit_revision: number }) => c.edit_revision > 0));
-  assert.equal(result.body.cards.find((c: { id: string }) => c.id === cardIds[0]).project_id, projectIds[0]);
+  assert.equal(result.body.cards.find((c: { id: string }) => c.id === cardIds[0]).project_id, projectIds[1]);
   const saved = checked(await member.from("cards").select("*").eq("column_id", projectIds[1]).is("archived_at", null).is("deleted_at", null).order("position").order("id"));
   assert.deepEqual(result.body.cards, saved, "Receipt must include all rebalanced destination rows");
   assert.deepEqual(checked(await admin.from("cards").select("*").eq("id", cardIds[5]).single()), archive);

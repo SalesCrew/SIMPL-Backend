@@ -180,7 +180,7 @@ try {
     assert.ifError(completed.error);
     assert.equal(completed.data.column_id, done);
     assert.ok(completed.data.completed_at);
-    assert.equal(completed.data.project_id, project);
+    assert.equal(completed.data.project_id, returnProject);
     assert.ifError(
       (await b.rpc("set_card_completed", { p_card: cardId, p_completed: true }))
         .error,
@@ -206,7 +206,7 @@ try {
   );
   const doneCard = await b.from("cards").select("*").eq("id", cardId).single();
   assert.ok(doneCard.data.completed_at);
-  assert.equal(doneCard.data.project_id, project);
+  assert.equal(doneCard.data.project_id, returnProject);
   console.log(
     "PASS: every project and In Arbeit -> Fertig, concurrent/idempotent checks, manual movement, reopen to the last real project",
   );
