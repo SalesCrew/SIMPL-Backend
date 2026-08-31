@@ -10,7 +10,9 @@ Use Node.js 22 or newer. Run `npm ci`, copy `.env.example` to `.env`, configure 
 
 ## Railway
 
-Create a separate project from `SalesCrew/SIMPL-Backend`. `railway.json` defines the build, start, health check, and restart policy. Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, and `FRONTEND_ORIGINS` as Railway service variables. `FRONTEND_ORIGINS` is a comma-separated exact allowlist of frontend origins. Railway supplies `PORT`.
+Create a separate project from `SalesCrew/SIMPL-Backend`. In Railway service settings use Railpack, build command `npm run build`, start command `npm start`, health check `/api/health`, and the On Failure restart policy. Configure these in the service dashboard: new services can no longer opt into the deprecated `railway.json` configuration format.
+
+Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, and `FRONTEND_ORIGINS` as Railway service variables. `FRONTEND_ORIGINS` is a comma-separated exact allowlist of frontend origins. Set `PORT=8080` and use the same target port for the public domain.
 
 Keep `SUPABASE_SECRET_KEY` server-only. It must never appear in Git, frontend variables, logs, or client bundles. No database migration or data reset runs during build/start/deploy.
 
