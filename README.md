@@ -20,6 +20,12 @@ Supabase migrations are versioned in `supabase/migrations/`. They have already b
 
 Card acknowledgement (`reviewed_at` / `reviewed_by`, shown as “Von [Name] gelesen”) is shared state. Every active role with workspace access can toggle it via direct card updates or edit sessions. The database supplies the actor and timestamp; workspace restrictions and session ownership remain enforced.
 
+## Workspace activity notifications
+
+The yellow bell is a private workspace activity feed. Authenticated user actions create notifications for every other active profile that can access the affected workspace: cards created, edited, moved, completed, reopened, acknowledged, archived/restored or deleted; card files added or removed; and new comments. The actor never receives their own event. Comment attachments are represented by the comment event so one message produces one bell entry.
+
+`private.publish_workspace_notification` is the only fan-out writer. It resolves recipients from live workspace/NDA rules, while notification RLS independently requires both `recipient_id = auth.uid()` and current access to `workspace_id`. Compound card operations share a transaction event key and collapse into one entry. Drag rebalancing marks only the actual dragged card, not every sibling whose numeric position changes. Five-second card undo deletes activity created by that edit session, so a reverted action cannot leave a false alert. Realtime continues through the per-user `access_revisions` channel; notification rows themselves do not expose another member's feed.
+
 ## Mandatory initial password change
 
 Every new profile receives an `account_security` row requiring a password change. `account_access_context()` exposes only the caller's gate status before workspace loading. Clients cannot forge the completion stamp. Restrictive RLS gates all business tables, and the API checks the same access context, including for admins. Existing workspace isolation policies are preserved.
