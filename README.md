@@ -24,6 +24,8 @@ Card acknowledgement (`reviewed_at` / `reviewed_by`, shown as “Von [Name] gele
 
 The yellow bell is a private workspace activity feed. Authenticated user actions create notifications for every other active profile that can access the affected workspace: cards created, edited, moved, completed, reopened, acknowledged, archived/restored or deleted; card files added or removed; and new comments. The actor never receives their own event. Comment attachments are represented by the comment event so one message produces one bell entry.
 
+Every active member with access to a workspace can archive one of its cards from the detailed card view. The protected card edit session sets `archived_at`, records the change for the five-second undo receipt and lets the existing activity trigger notify the other workspace members. Archived cards leave all active board queries immediately and remain read-only in the archive.
+
 `private.publish_workspace_notification` is the only fan-out writer. It resolves recipients from live workspace/NDA rules, while notification RLS independently requires both `recipient_id = auth.uid()` and current access to `workspace_id`. Compound card operations share a transaction event key and collapse into one entry. Drag rebalancing marks only the actual dragged card, not every sibling whose numeric position changes. Five-second card undo deletes activity created by that edit session, so a reverted action cannot leave a false alert. Realtime continues through the per-user `access_revisions` channel; notification rows themselves do not expose another member's feed.
 
 ## Mandatory initial password change
