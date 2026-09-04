@@ -37,6 +37,14 @@ const emailConfigurationSchema = z.discriminatedUnion("EMAIL_TRANSPORT", [
   ewsEmailConfigurationSchema,
 ]);
 
+export const workspaceEmailEventSchema = z.enum([
+  "comment.created",
+  "card.created",
+  "card.reviewed",
+  "card.completed",
+  "card.archived",
+]);
+
 const emailJobSchema = z.object({
   outbox_id: z.coerce.number().int().positive(),
   lease_token: z.string().uuid(),
@@ -47,12 +55,7 @@ const emailJobSchema = z.object({
   workspace_name: z.string().min(1),
   workspace_id: z.string().uuid(),
   card_id: z.string().uuid().nullable(),
-  event_type: z.enum([
-    "comment.created",
-    "card.created",
-    "card.reviewed",
-    "card.completed",
-  ]),
+  event_type: workspaceEmailEventSchema,
   subject: z.string().min(1),
   body: z.string(),
   event_created_at: z.string().datetime({ offset: true }),
@@ -63,6 +66,7 @@ export type EmailConfiguration = z.infer<typeof emailConfigurationSchema>;
 export type SmtpEmailConfiguration = z.infer<typeof smtpEmailConfigurationSchema>;
 export type EwsEmailConfiguration = z.infer<typeof ewsEmailConfigurationSchema>;
 export type EmailJob = z.infer<typeof emailJobSchema>;
+export type WorkspaceEmailEvent = z.infer<typeof workspaceEmailEventSchema>;
 
 export interface EmailOutboxStore {
   claim(limit: number): Promise<EmailJob[]>;
@@ -178,6 +182,10 @@ const eventCopy: Record<EmailJob["event_type"], {
     subject: "Karte erledigt",
     sentence: (actor) => `${actor} hat die Karte als erledigt markiert.`,
   },
+  "card.archived": {
+    subject: "Karte archiviert",
+    sentence: (actor) => `${actor} hat die Karte archiviert.`,
+  },
 };
 
 export function mailOptionsForJob(
@@ -268,8 +276,16 @@ export async function deliverEmailBatch(
   transport: Pick<EmailTransport, "sendMail">,
   configuration: EmailConfiguration,
   limit = 20,
-): Promise<number> {
+): Promise<{
+  claimed: number;
+  succeeded: number;
+  failed: number;
+  retryAfterMs: number | null;
+}> {
   const jobs = await store.claim(limit);
+  let succeeded = 0;
+  let failed = 0;
+  let retryAfterMs: number | null = null;
   for (const job of jobs) {
     try {
       await transport.sendMail(mailOptionsForJob(job, configuration));
@@ -280,11 +296,24 @@ export async function deliverEmailBatch(
         code,
       });
       await store.finish(job.outbox_id, job.lease_token, false, code);
+      failed += 1;
+      if (job.attempt_count < 8) {
+        const delay = Math.min(
+          3_600_000,
+          30_000 * 2 ** Math.max(job.attempt_count - 1, 0),
+        );
+        retryAfterMs = retryAfterMs === null ? delay : Math.min(retryAfterMs, delay);
+      }
       continue;
     }
     await store.finish(job.outbox_id, job.lease_token, true);
+    succeeded += 1;
+    console.log("SIMPL email delivery sent", {
+      outboxId: job.outbox_id,
+      eventType: job.event_type,
+    });
   }
-  return jobs.length;
+  return { claimed: jobs.length, succeeded, failed, retryAfterMs };
 }
 
 export function createSmtpEmailTransport(
@@ -314,20 +343,113 @@ export function createEmailTransport(
     : createSmtpEmailTransport(configuration);
 }
 
+export interface EmailNotificationWorker {
+  wake(trigger: WorkspaceEmailEvent | "startup" | "retry"): Promise<void>;
+  stop(): void;
+}
+
+let activeEmailWorker: EmailNotificationWorker | null = null;
+
+export function requestEmailNotificationDelivery(
+  eventType: WorkspaceEmailEvent,
+): boolean {
+  if (!activeEmailWorker) return false;
+  void activeEmailWorker.wake(eventType);
+  return true;
+}
+
+export function createEventDrivenEmailWorker(
+  store: EmailOutboxStore,
+  transport: EmailTransport,
+  configuration: EmailConfiguration,
+): EmailNotificationWorker {
+  let stopped = false;
+  let running: Promise<void> | null = null;
+  let wakeQueued = false;
+  let verified = false;
+  let retryTimer: NodeJS.Timeout | null = null;
+
+  function scheduleRetry(delayMs: number) {
+    if (stopped) return;
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      void worker.wake("retry");
+    }, delayMs + 250);
+    retryTimer.unref();
+  }
+
+  async function drain() {
+    let retryAfterMs: number | null = null;
+    do {
+      wakeQueued = false;
+      try {
+        if (!verified) {
+          await transport.verify();
+          verified = true;
+          console.log("SIMPL event email delivery ready.");
+        }
+        for (let batch = 0; batch < 5; batch += 1) {
+          const delivered = await deliverEmailBatch(store, transport, configuration);
+          if (delivered.retryAfterMs !== null) {
+            retryAfterMs = retryAfterMs === null
+              ? delivered.retryAfterMs
+              : Math.min(retryAfterMs, delivered.retryAfterMs);
+          }
+          if (delivered.claimed < 20) break;
+        }
+      } catch (error) {
+        verified = false;
+        retryAfterMs = 30_000;
+        console.error("SIMPL event email delivery unavailable", {
+          code: errorCode(error),
+        });
+      }
+    } while (wakeQueued && !stopped);
+    if (retryAfterMs !== null) scheduleRetry(retryAfterMs);
+  }
+
+  const worker: EmailNotificationWorker = {
+    wake: async (trigger) => {
+      if (stopped) return;
+      if (retryTimer && trigger !== "retry") {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      wakeQueued = true;
+      if (!running) {
+        running = drain().finally(() => {
+          running = null;
+          if (wakeQueued && !stopped) void worker.wake("retry");
+        });
+      }
+      await running;
+    },
+    stop() {
+      stopped = true;
+      wakeQueued = false;
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = null;
+      transport.close();
+    },
+  };
+  return worker;
+}
+
 export function startEmailNotificationWorker(
   environment: NodeJS.ProcessEnv = process.env,
-) {
+): EmailNotificationWorker {
   const configuration = readEmailConfiguration(environment);
   if (!configuration) {
-    console.log("SIMPL email worker disabled: email configuration incomplete.");
-    return { stop() {} };
+    console.log("SIMPL event email delivery disabled: email configuration incomplete.");
+    return { wake: async () => {}, stop() {} };
   }
   const activeConfiguration = configuration;
   const url = environment.SUPABASE_URL;
   const secret = environment.SUPABASE_SECRET_KEY;
   if (!url || !secret) {
-    console.log("SIMPL email worker disabled: Supabase server configuration incomplete.");
-    return { stop() {} };
+    console.log("SIMPL event email delivery disabled: Supabase server configuration incomplete.");
+    return { wake: async () => {}, stop() {} };
   }
 
   const admin = createClient(url, secret, {
@@ -335,46 +457,15 @@ export function startEmailNotificationWorker(
   });
   const store = createEmailOutboxStore(admin);
   const transport = createEmailTransport(activeConfiguration);
-  const intervalMs = Math.max(
-    5_000,
-    Number(environment.EMAIL_POLL_INTERVAL_MS || 10_000) || 10_000,
-  );
-  let stopped = false;
-  let running = false;
-  let verified = false;
-
-  async function tick() {
-    if (stopped || running) return;
-    running = true;
-    try {
-      if (!verified) {
-        await transport.verify();
-        verified = true;
-        console.log("SIMPL email worker ready.");
-      }
-      for (let batch = 0; batch < 5; batch += 1) {
-        const delivered = await deliverEmailBatch(
-          store,
-          transport,
-          activeConfiguration,
-        );
-        if (delivered < 20) break;
-      }
-    } catch (error) {
-      console.error("SIMPL email worker unavailable", { code: errorCode(error) });
-    } finally {
-      running = false;
-    }
-  }
-
-  const timer = setInterval(() => void tick(), intervalMs);
-  timer.unref();
-  void tick();
+  const worker = createEventDrivenEmailWorker(store, transport, activeConfiguration);
+  activeEmailWorker?.stop();
+  activeEmailWorker = worker;
+  void worker.wake("startup");
   return {
+    wake: worker.wake,
     stop() {
-      stopped = true;
-      clearInterval(timer);
-      transport.close();
+      if (activeEmailWorker === worker) activeEmailWorker = null;
+      worker.stop();
     },
   };
 }

@@ -1,11 +1,12 @@
 # SIMPL workspace email
 
-SIMPL sends email for four committed workspace events:
+SIMPL sends email for five committed workspace events:
 
 - a new card;
 - a new comment;
 - a card marked as read;
 - a card marked as completed.
+- a card is archived.
 
 The existing `private.publish_workspace_notification` function determines the recipients. It includes every active profile that can currently access the workspace and excludes the actor. The email outbox mirrors those per-recipient notification rows, so workspace isolation and pairwise NDA blocks are not reimplemented in application code.
 
@@ -39,6 +40,8 @@ When `EMAIL_TRANSPORT=smtp`, configure the SMTP fallback instead:
 | `SMTP_USER` | SMTP-out account username |
 | `SMTP_PASSWORD` | SMTP-out account password |
 
-`EMAIL_POLL_INTERVAL_MS` is optional and defaults to `10000`. Keep `SUPABASE_URL` and `SUPABASE_SECRET_KEY` configured as before. Never add EWS or SMTP credentials to Git, frontend variables, logs or browser code.
+Keep `SUPABASE_URL` and `SUPABASE_SECRET_KEY` configured as before. Never add EWS or SMTP credentials to Git, frontend variables, logs or browser code.
 
-`GET /api/health` reports `emailConfigured: true` only when the selected transport's required variables are present and valid. Railway logs `SIMPL email worker ready.` after it verifies the EWS mailbox or SMTP connection. It logs only bounded error codes, never credentials or message bodies.
+There is no recurring email cron or polling loop. After a supported action commits, the signed-in frontend calls `POST /api/email/dispatch` with its Supabase bearer token. Railway returns `202` immediately and owns the EWS delivery even if the browser disconnects. The outbox remains the durable source of truth, and a failed delivery schedules a one-shot exponential-backoff retry tied to that event. Startup performs one recovery pass for committed work left by a prior process.
+
+`GET /api/health` reports `emailConfigured: true` only when the selected transport's required variables are present and valid, plus `emailDeliveryMode: "event"`. Railway logs `SIMPL event email delivery ready.` after it verifies the EWS mailbox or SMTP connection, `SIMPL email dispatch accepted` for action wake-ups, and `SIMPL email delivery sent` after an outbox row is acknowledged. It logs only event names, outbox IDs and bounded error codes—never credentials, recipient addresses or message bodies.

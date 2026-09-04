@@ -76,6 +76,12 @@ describe("Admin API access and validation", () => {
     );
     expect(r.status).toBe(401);
   });
+  it("requires authentication before waking email delivery", async () => {
+    const r = await request(app)
+      .post("/api/email/dispatch")
+      .send({ event_type: "card.created" });
+    expect(r.status).toBe(401);
+  });
   it("requires authentication before streaming any file", async () => {
     const r = await request(app).get(
       "/api/attachments/00000000-0000-4000-8000-000000000001/download",

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createEventDrivenEmailWorker,
   deliverEmailBatch,
   emailNotificationsConfigured,
   mailOptionsForJob,
@@ -111,7 +112,12 @@ describe("workspace email delivery", () => {
       finish: vi.fn(async () => {}),
     };
     const transport = { sendMail: vi.fn(async () => ({ accepted: [job.recipient_email] })) };
-    expect(await deliverEmailBatch(store, transport, configuration)).toBe(1);
+    expect(await deliverEmailBatch(store, transport, configuration)).toEqual({
+      claimed: 1,
+      succeeded: 1,
+      failed: 0,
+      retryAfterMs: null,
+    });
     expect(transport.sendMail).toHaveBeenCalledOnce();
     expect(store.finish).toHaveBeenCalledWith(
       job.outbox_id,
@@ -131,7 +137,12 @@ describe("workspace email delivery", () => {
     });
     const transport = { sendMail: vi.fn(async () => { throw failure; }) };
     const logged = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(await deliverEmailBatch(store, transport, configuration)).toBe(1);
+    expect(await deliverEmailBatch(store, transport, configuration)).toEqual({
+      claimed: 1,
+      succeeded: 0,
+      failed: 1,
+      retryAfterMs: 30000,
+    });
     expect(store.finish).toHaveBeenCalledWith(
       job.outbox_id,
       job.lease_token,
@@ -141,6 +152,40 @@ describe("workspace email delivery", () => {
     expect(JSON.stringify(logged.mock.calls)).not.toContain(
       "contains-sensitive-server-detail",
     );
+    logged.mockRestore();
+  });
+
+  it("renders archived-card mail explicitly", () => {
+    const options = mailOptionsForJob({
+      ...job,
+      event_type: "card.archived",
+    }, configuration);
+    expect(options.subject).toBe("SIMPL · Karte archiviert: Dashboard");
+    expect(options.text).toContain("Anna hat die Karte archiviert.");
+  });
+
+  it("drains immediately when an action wakes the event-driven worker", async () => {
+    const store: EmailOutboxStore = {
+      claim: vi.fn(async () => [job]),
+      finish: vi.fn(async () => {}),
+    };
+    const transport = {
+      verify: vi.fn(async () => true),
+      sendMail: vi.fn(async () => ({ accepted: [job.recipient_email] })),
+      close: vi.fn(),
+    };
+    const logged = vi.spyOn(console, "log").mockImplementation(() => {});
+    const worker = createEventDrivenEmailWorker(store, transport, configuration);
+    await worker.wake("comment.created");
+    expect(transport.verify).toHaveBeenCalledOnce();
+    expect(transport.sendMail).toHaveBeenCalledOnce();
+    expect(store.finish).toHaveBeenCalledWith(
+      job.outbox_id,
+      job.lease_token,
+      true,
+    );
+    worker.stop();
+    expect(transport.close).toHaveBeenCalledOnce();
     logged.mockRestore();
   });
 });

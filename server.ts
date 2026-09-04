@@ -34,7 +34,11 @@ import {
   createProfileSchema,
   profileSchema,
 } from "./src/validation.js";
-import { emailNotificationsConfigured } from "./src/email-notifications.js";
+import {
+  emailNotificationsConfigured,
+  requestEmailNotificationDelivery,
+  workspaceEmailEventSchema,
+} from "./src/email-notifications.js";
 
 export const app = express();
 app.disable("x-powered-by");
@@ -81,6 +85,7 @@ app.get("/api/health", (_req, res) => {
       process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
     ),
     emailConfigured: emailNotificationsConfigured(),
+    emailDeliveryMode: "event",
   });
 });
 
@@ -150,6 +155,21 @@ async function memberOnly(req: Request, res: Response, next: NextFunction) {
   });
 }
 app.post("/api/account/initial-password", authenticatedAccount, changeInitialPassword);
+app.post("/api/email/dispatch", memberOnly, (req, res, next) => {
+  try {
+    const { event_type: eventType } = z.object({
+      event_type: workspaceEmailEventSchema,
+    }).strict().parse(req.body);
+    if (!requestEmailNotificationDelivery(eventType)) {
+      res.status(503).json({ error: "Der E-Mail-Versand ist gerade nicht bereit." });
+      return;
+    }
+    console.log("SIMPL email dispatch accepted", { eventType });
+    res.status(202).json({ accepted: true });
+  } catch (error) {
+    next(error);
+  }
+});
 app.use("/api/users", memberOnly, (_req, res, next) => {
   if (res.locals.role !== "admin") {
     res

@@ -9,6 +9,10 @@ const denyPolicy = readFileSync(new URL(
   "../supabase/migrations/20260904080931_email_outbox_explicit_deny_policy.sql",
   import.meta.url,
 ), "utf8");
+const eventTriggered = readFileSync(new URL(
+  "../supabase/migrations/20260904091132_event_triggered_workspace_email.sql",
+  import.meta.url,
+), "utf8");
 
 describe("workspace email outbox migration", () => {
   it("queues exactly the four requested activity events without backfilling history", () => {
@@ -38,5 +42,11 @@ describe("workspace email outbox migration", () => {
     expect(migration).toContain("interval '30 days'");
     expect(migration).toContain("create index email_outbox_recipient");
     expect(migration).toContain("create index email_outbox_workspace");
+  });
+
+  it("adds archived cards without backfilling stale activity", () => {
+    expect(eventTriggered).toContain("'card.archived'");
+    expect(eventTriggered).toContain("create or replace function private.enqueue_workspace_email()");
+    expect(eventTriggered).not.toMatch(/insert into public\.email_outbox[\s\S]+select[\s\S]+from public\.notifications/i);
   });
 });
