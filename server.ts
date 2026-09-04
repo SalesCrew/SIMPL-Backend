@@ -34,6 +34,7 @@ import {
   createProfileSchema,
   profileSchema,
 } from "./src/validation.js";
+import { emailNotificationsConfigured } from "./src/email-notifications.js";
 
 export const app = express();
 app.disable("x-powered-by");
@@ -79,6 +80,7 @@ app.get("/api/health", (_req, res) => {
     configured: Boolean(
       process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY,
     ),
+    emailConfigured: emailNotificationsConfigured(),
   });
 });
 

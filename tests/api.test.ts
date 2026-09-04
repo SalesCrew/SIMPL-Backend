@@ -63,6 +63,7 @@ describe("Admin API access and validation", () => {
     const r = await request(app).get("/api/health");
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ ok: true, service: "simpl-backend" });
+    expect(typeof r.body.emailConfigured).toBe("boolean");
     expect(r.headers["cache-control"]).toBe("no-store");
   });
   it("requires authentication before any admin mutation", async () => {

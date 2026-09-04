@@ -12,7 +12,7 @@ Use Node.js 22 or newer. Run `npm ci`, copy `.env.example` to `.env`, configure 
 
 Create a separate project from `SalesCrew/SIMPL-Backend`. In Railway service settings use Railpack, build command `npm run build`, start command `npm start`, health check `/api/health`, and the On Failure restart policy. Configure these in the service dashboard: new services can no longer opt into the deprecated `railway.json` configuration format.
 
-Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, and `FRONTEND_ORIGINS` as Railway service variables. `FRONTEND_ORIGINS` is a comma-separated exact allowlist of frontend origins. Set `PORT=8080` and use the same target port for the public domain.
+Set `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, and `FRONTEND_ORIGINS` as Railway service variables. `FRONTEND_ORIGINS` is a comma-separated exact allowlist of frontend origins. Set `PORT=8080` and use the same target port for the public domain. The SMTP variables needed for workspace email are documented in `docs/EMAIL_NOTIFICATIONS.md`.
 
 Keep `SUPABASE_SECRET_KEY` server-only. It must never appear in Git, frontend variables, logs, or client bundles. No database migration or data reset runs during build/start/deploy.
 
@@ -27,6 +27,10 @@ The yellow bell is a private workspace activity feed. Authenticated user actions
 Every active member with access to a workspace can archive one of its cards from the detailed card view. The protected card edit session sets `archived_at`, records the change for the five-second undo receipt and lets the existing activity trigger notify the other workspace members. Archived cards leave all active board queries immediately and remain read-only in the archive.
 
 `private.publish_workspace_notification` is the only fan-out writer. It resolves recipients from live workspace/NDA rules, while notification RLS independently requires both `recipient_id = auth.uid()` and current access to `workspace_id`. Compound card operations share a transaction event key and collapse into one entry. Drag rebalancing marks only the actual dragged card, not every sibling whose numeric position changes. Five-second card undo deletes activity created by that edit session, so a reverted action cannot leave a false alert. Realtime continues through the per-user `access_revisions` channel; notification rows themselves do not expose another member's feed.
+
+## Workspace email notifications
+
+New cards, comments, card acknowledgements and completed cards also create one email job for every other active profile with current access to the workspace. The existing private workspace notification writer remains the sole recipient authority, so actor exclusion and NDA isolation are identical for the bell and email. Railway claims jobs with short leases and sends each recipient separately over authenticated TLS SMTP. Failed deliveries retry with backoff; a browser disconnect cannot remove a committed job. See `docs/EMAIL_NOTIFICATIONS.md` for configuration and operations.
 
 ## Mandatory initial password change
 
