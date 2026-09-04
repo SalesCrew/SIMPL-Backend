@@ -1,16 +1,41 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import nodemailer, { type SendMailOptions, type Transporter } from "nodemailer";
 import { z } from "zod";
+import { createEwsEmailTransport } from "./ews-email.js";
 
-const emailConfigurationSchema = z.object({
-  SMTP_HOST: z.string().trim().min(1),
-  SMTP_PORT: z.coerce.number().int().min(1).max(65535),
-  SMTP_USER: z.string().trim().min(1),
-  SMTP_PASSWORD: z.string().min(1),
+const commonEmailConfigurationSchema = z.object({
   SMTP_FROM: z.string().trim().email(),
   SMTP_FROM_NAME: z.string().trim().min(1).max(100).default("SIMPL"),
   APP_URL: z.string().trim().url(),
 });
+
+const smtpEmailConfigurationSchema = commonEmailConfigurationSchema.extend({
+  EMAIL_TRANSPORT: z.literal("smtp"),
+  SMTP_HOST: z.string().trim().min(1),
+  SMTP_PORT: z.coerce.number().int().min(1).max(65535),
+  SMTP_USER: z.string().trim().min(1),
+  SMTP_PASSWORD: z.string().min(1),
+});
+
+const ewsEmailConfigurationSchema = commonEmailConfigurationSchema.extend({
+  EMAIL_TRANSPORT: z.literal("ews"),
+  OUTLOOK_PROVIDER: z.literal("ews_ntlm"),
+  OUTLOOK_EWS_URL: z.string().trim().url().refine(
+    (value) => new URL(value).protocol === "https:",
+    "EWS must use HTTPS",
+  ),
+  OUTLOOK_EWS_EMAIL: z.string().trim().min(1),
+  OUTLOOK_EWS_PASSWORD: z.string().min(1),
+  OUTLOOK_EWS_CONTENT_TYPE: z.string().trim().regex(
+    /^text\/xml\s*;\s*charset=utf-8$/i,
+  ),
+  OUTLOOK_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(120_000),
+});
+
+const emailConfigurationSchema = z.discriminatedUnion("EMAIL_TRANSPORT", [
+  smtpEmailConfigurationSchema,
+  ewsEmailConfigurationSchema,
+]);
 
 const emailJobSchema = z.object({
   outbox_id: z.coerce.number().int().positive(),
@@ -35,6 +60,8 @@ const emailJobSchema = z.object({
 });
 
 export type EmailConfiguration = z.infer<typeof emailConfigurationSchema>;
+export type SmtpEmailConfiguration = z.infer<typeof smtpEmailConfigurationSchema>;
+export type EwsEmailConfiguration = z.infer<typeof ewsEmailConfigurationSchema>;
 export type EmailJob = z.infer<typeof emailJobSchema>;
 
 export interface EmailOutboxStore {
@@ -53,19 +80,45 @@ export interface EmailTransport {
   close(): void;
 }
 
-const requiredEmailEnvironment = [
-  "SMTP_HOST",
-  "SMTP_PORT",
-  "SMTP_USER",
-  "SMTP_PASSWORD",
+const requiredCommonEmailEnvironment = [
   "SMTP_FROM",
   "APP_URL",
 ] as const;
 
+const requiredSmtpEmailEnvironment = [
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_USER",
+  "SMTP_PASSWORD",
+] as const;
+
+const requiredEwsEmailEnvironment = [
+  "OUTLOOK_PROVIDER",
+  "OUTLOOK_EWS_URL",
+  "OUTLOOK_EWS_EMAIL",
+  "OUTLOOK_EWS_PASSWORD",
+  "OUTLOOK_EWS_CONTENT_TYPE",
+  "OUTLOOK_TIMEOUT_MS",
+] as const;
+
+function selectedEmailTransport(environment: NodeJS.ProcessEnv) {
+  return environment.EMAIL_TRANSPORT?.trim().toLowerCase() || "smtp";
+}
+
+function normalizedEmailEnvironment(environment: NodeJS.ProcessEnv) {
+  return {
+    ...environment,
+    EMAIL_TRANSPORT: selectedEmailTransport(environment),
+  };
+}
+
 export function missingEmailEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
 ): string[] {
-  return requiredEmailEnvironment.filter(
+  const transportEnvironment = selectedEmailTransport(environment) === "ews"
+    ? requiredEwsEmailEnvironment
+    : requiredSmtpEmailEnvironment;
+  return [...requiredCommonEmailEnvironment, ...transportEnvironment].filter(
     (name) => !environment[name]?.trim(),
   );
 }
@@ -74,14 +127,16 @@ export function emailNotificationsConfigured(
   environment: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (missingEmailEnvironment(environment).length) return false;
-  return emailConfigurationSchema.safeParse(environment).success;
+  return emailConfigurationSchema.safeParse(
+    normalizedEmailEnvironment(environment),
+  ).success;
 }
 
 export function readEmailConfiguration(
   environment: NodeJS.ProcessEnv = process.env,
 ): EmailConfiguration | null {
   if (missingEmailEnvironment(environment).length) return null;
-  return emailConfigurationSchema.parse(environment);
+  return emailConfigurationSchema.parse(normalizedEmailEnvironment(environment));
 }
 
 function oneLine(value: string) {
@@ -201,6 +256,7 @@ export function createEmailOutboxStore(
 function errorCode(error: unknown) {
   const details = error as { code?: unknown; responseCode?: unknown };
   const code = typeof details?.code === "string" ? details.code : "DELIVERY_FAILED";
+  if (code.startsWith("EWS:")) return code.slice(0, 500);
   const responseCode = Number.isInteger(details?.responseCode)
     ? String(details.responseCode)
     : "";
@@ -231,8 +287,8 @@ export async function deliverEmailBatch(
   return jobs.length;
 }
 
-export function createEmailTransport(
-  configuration: EmailConfiguration,
+export function createSmtpEmailTransport(
+  configuration: SmtpEmailConfiguration,
 ): Transporter {
   return nodemailer.createTransport({
     host: configuration.SMTP_HOST,
@@ -250,12 +306,20 @@ export function createEmailTransport(
   });
 }
 
+export function createEmailTransport(
+  configuration: EmailConfiguration,
+): EmailTransport {
+  return configuration.EMAIL_TRANSPORT === "ews"
+    ? createEwsEmailTransport(configuration)
+    : createSmtpEmailTransport(configuration);
+}
+
 export function startEmailNotificationWorker(
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   const configuration = readEmailConfiguration(environment);
   if (!configuration) {
-    console.log("SIMPL email worker disabled: SMTP configuration incomplete.");
+    console.log("SIMPL email worker disabled: email configuration incomplete.");
     return { stop() {} };
   }
   const activeConfiguration = configuration;

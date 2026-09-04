@@ -11,6 +11,7 @@ import {
 } from "../src/email-notifications.js";
 
 const configuration: EmailConfiguration = {
+  EMAIL_TRANSPORT: "smtp",
   SMTP_HOST: "smtp.example.test",
   SMTP_PORT: 587,
   SMTP_USER: "mailer@example.test",
@@ -40,16 +41,17 @@ const job: EmailJob = {
 describe("workspace email delivery", () => {
   it("requires every secret-bearing Railway setting without exposing values", () => {
     expect(missingEmailEnvironment({})).toEqual([
+      "SMTP_FROM",
+      "APP_URL",
       "SMTP_HOST",
       "SMTP_PORT",
       "SMTP_USER",
       "SMTP_PASSWORD",
-      "SMTP_FROM",
-      "APP_URL",
     ]);
     expect(emailNotificationsConfigured({})).toBe(false);
     expect(readEmailConfiguration({})).toBeNull();
     expect(emailNotificationsConfigured({
+      EMAIL_TRANSPORT: configuration.EMAIL_TRANSPORT,
       SMTP_HOST: configuration.SMTP_HOST,
       SMTP_PORT: String(configuration.SMTP_PORT),
       SMTP_USER: configuration.SMTP_USER,
@@ -57,6 +59,30 @@ describe("workspace email delivery", () => {
       SMTP_FROM: configuration.SMTP_FROM,
       APP_URL: configuration.APP_URL,
     })).toBe(true);
+  });
+
+  it("validates the HTTPS EWS/NTLM configuration independently of SMTP", () => {
+    const environment = {
+      EMAIL_TRANSPORT: "ews",
+      SMTP_FROM: "noreply@example.test",
+      APP_URL: "https://get-simpl.vercel.app",
+      OUTLOOK_PROVIDER: "ews_ntlm",
+      OUTLOOK_EWS_URL: "https://mail.example.test/EWS/Exchange.asmx",
+      OUTLOOK_EWS_EMAIL: "mailer@example.test",
+      OUTLOOK_EWS_PASSWORD: "test-only-secret",
+      OUTLOOK_EWS_CONTENT_TYPE: "text/xml; charset=utf-8",
+      OUTLOOK_TIMEOUT_MS: "30000",
+    };
+    expect(missingEmailEnvironment(environment)).toEqual([]);
+    expect(emailNotificationsConfigured(environment)).toBe(true);
+    expect(readEmailConfiguration(environment)).toMatchObject({
+      EMAIL_TRANSPORT: "ews",
+      OUTLOOK_TIMEOUT_MS: 30000,
+    });
+    expect(emailNotificationsConfigured({
+      ...environment,
+      OUTLOOK_EWS_URL: "http://mail.example.test/EWS/Exchange.asmx",
+    })).toBe(false);
   });
 
   it("builds a private per-recipient German email with escaped event content", () => {
