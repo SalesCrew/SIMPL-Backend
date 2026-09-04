@@ -30,7 +30,7 @@ Every active member with access to a workspace can archive one of its cards from
 
 ## Workspace email notifications
 
-New cards, comments, card acknowledgements, completed cards and archived cards also create one email job for every other active profile with current access to the workspace. The existing private workspace notification writer remains the sole recipient authority, so actor exclusion and NDA isolation are identical for the bell and email. Each successful action calls the authenticated Railway dispatch API, which claims jobs with short leases and sends each recipient separately through the configured EWS/NTLM-over-HTTPS or TLS SMTP transport. There is no repeating mail poller. Failed deliveries use event-tied backoff retries; a browser disconnect cannot remove a committed job. See `docs/EMAIL_NOTIFICATIONS.md` for configuration and operations.
+New cards, comments, card acknowledgements, completed cards and archived cards can create one email job for every other active profile with current access to the workspace, subject to that person's master, event, workspace and project preferences. The existing private workspace notification writer remains the sole recipient authority, so actor exclusion and NDA isolation are identical for the bell and email. Each successful action calls the authenticated Railway dispatch API, which claims jobs with short leases, rechecks access and preferences, and sends each recipient separately through the configured EWS/NTLM-over-HTTPS or TLS SMTP transport. There is no repeating mail poller. Failed deliveries use event-tied backoff retries; a browser disconnect cannot remove a committed job. See `docs/EMAIL_NOTIFICATIONS.md` for configuration and operations.
 
 ## Mandatory initial password change
 

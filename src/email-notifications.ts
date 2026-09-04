@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import nodemailer, { type SendMailOptions, type Transporter } from "nodemailer";
 import { z } from "zod";
 import { createEwsEmailTransport } from "./ews-email.js";
+import { renderSimplEmailHtml } from "./email-template.js";
 
 const commonEmailConfigurationSchema = z.object({
   SMTP_FROM: z.string().trim().email(),
@@ -54,6 +55,7 @@ const emailJobSchema = z.object({
   actor_name: z.string().min(1),
   workspace_name: z.string().min(1),
   workspace_id: z.string().uuid(),
+  project_id: z.string().uuid().nullable(),
   card_id: z.string().uuid().nullable(),
   event_type: workspaceEmailEventSchema,
   subject: z.string().min(1),
@@ -147,16 +149,6 @@ function oneLine(value: string) {
   return value.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#039;",
-  })[character]!);
-}
-
 function compactBody(value: string, limit = 1200) {
   const body = value.trim();
   return body.length > limit ? `${body.slice(0, limit - 1).trimEnd()}…` : body;
@@ -164,26 +156,38 @@ function compactBody(value: string, limit = 1200) {
 
 const eventCopy: Record<EmailJob["event_type"], {
   subject: string;
+  headline: string;
+  icon: string;
   sentence: (actor: string) => string;
 }> = {
   "card.created": {
     subject: "Neue Karte",
+    headline: "Eine neue Karte ist da.",
+    icon: "+",
     sentence: (actor) => `${actor} hat eine neue Karte erstellt.`,
   },
   "comment.created": {
     subject: "Neuer Kommentar",
+    headline: "Es gibt einen neuen Kommentar.",
+    icon: "•",
     sentence: (actor) => `${actor} hat einen Kommentar geschrieben.`,
   },
   "card.reviewed": {
     subject: "Karte gelesen",
+    headline: "Eine Karte wurde wahrgenommen.",
+    icon: "✓",
     sentence: (actor) => `${actor} hat die Karte als gelesen markiert.`,
   },
   "card.completed": {
     subject: "Karte erledigt",
+    headline: "Eine Karte ist erledigt.",
+    icon: "✓",
     sentence: (actor) => `${actor} hat die Karte als erledigt markiert.`,
   },
   "card.archived": {
     subject: "Karte archiviert",
+    headline: "Eine Karte wurde archiviert.",
+    icon: "↓",
     sentence: (actor) => `${actor} hat die Karte archiviert.`,
   },
 };
@@ -200,15 +204,21 @@ export function mailOptionsForJob(
     ? compactBody(job.body)
     : "";
   const appUrl = new URL(configuration.APP_URL).origin;
-  const occurred = new Intl.DateTimeFormat("de-AT", {
-    dateStyle: "medium",
-    timeStyle: "short",
+  const eventDate = new Date(job.event_created_at);
+  const occurredDate = new Intl.DateTimeFormat("de-AT", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
     timeZone: "Europe/Vienna",
-  }).format(new Date(job.event_created_at));
+  }).format(eventDate);
+  const occurredTime = new Intl.DateTimeFormat("de-AT", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Europe/Vienna",
+  }).format(eventDate);
+  const occurred = `${occurredDate} · ${occurredTime} Uhr`;
   const bodyText = eventBody ? `\n\n„${eventBody}“` : "";
-  const bodyHtml = eventBody
-    ? `<blockquote style="margin:20px 0 0;padding:14px 16px;border-left:3px solid #91a882;background:#f6f8f3;color:#425346;white-space:pre-wrap">${escapeHtml(eventBody)}</blockquote>`
-    : "";
+  const message = copy.sentence(actor);
 
   return {
     from: {
@@ -225,7 +235,7 @@ export function mailOptionsForJob(
     text: [
       `Hallo ${oneLine(job.recipient_name)},`,
       "",
-      copy.sentence(actor) + bodyText,
+      message + bodyText,
       "",
       `Workspace: ${workspace}`,
       `Karte: ${card}`,
@@ -233,9 +243,20 @@ export function mailOptionsForJob(
       "",
       `In SIMPL öffnen: ${appUrl}`,
       "",
-      "Du erhältst diese Nachricht, weil du Zugriff auf diesen Workspace hast.",
+      "Du erhältst diese Nachricht entsprechend deinen persönlichen E-Mail-Einstellungen.",
     ].join("\n"),
-    html: `<!doctype html><html><body style="margin:0;background:#f6f8f3;color:#263d31;font-family:Arial,sans-serif"><div style="max-width:620px;margin:0 auto;padding:36px 20px"><div style="font-size:24px;font-weight:700;margin-bottom:28px">simpl</div><div style="background:#fff;border:1px solid #e3e9df;border-radius:16px;padding:28px"><p style="margin:0 0 18px">Hallo ${escapeHtml(oneLine(job.recipient_name))},</p><h1 style="margin:0 0 12px;font-size:21px;line-height:1.35">${escapeHtml(copy.subject)}</h1><p style="margin:0;color:#53624e;line-height:1.65">${escapeHtml(copy.sentence(actor))}</p>${bodyHtml}<dl style="margin:24px 0;color:#53624e;font-size:14px;line-height:1.7"><dt style="font-weight:700">Workspace</dt><dd style="margin:0 0 8px">${escapeHtml(workspace)}</dd><dt style="font-weight:700">Karte</dt><dd style="margin:0 0 8px">${escapeHtml(card)}</dd><dt style="font-weight:700">Zeitpunkt</dt><dd style="margin:0">${escapeHtml(occurred)}</dd></dl><a href="${escapeHtml(appUrl)}" style="display:inline-block;padding:11px 16px;border-radius:9px;background:#334f3d;color:#fff;text-decoration:none;font-size:14px;font-weight:700">In SIMPL öffnen</a></div><p style="margin:18px 4px 0;color:#82907c;font-size:12px;line-height:1.6">Du erhältst diese Nachricht, weil du Zugriff auf diesen Workspace hast.</p></div></body></html>`,
+    html: renderSimplEmailHtml({
+      recipientName: oneLine(job.recipient_name),
+      eventLabel: copy.subject.toLocaleUpperCase("de-AT"),
+      eventIcon: copy.icon,
+      headline: copy.headline,
+      message,
+      workspace,
+      card,
+      timestamp: occurred,
+      actionUrl: appUrl,
+      commentBody: eventBody,
+    }),
   };
 }
 

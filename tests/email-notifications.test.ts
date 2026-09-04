@@ -31,6 +31,7 @@ const job: EmailJob = {
   actor_name: "Anna",
   workspace_name: "Development",
   workspace_id: "30000000-0000-4000-8000-000000000003",
+  project_id: "50000000-0000-4000-8000-000000000005",
   card_id: "40000000-0000-4000-8000-000000000004",
   event_type: "comment.created",
   subject: "Dashboard",
@@ -103,6 +104,9 @@ describe("workspace email delivery", () => {
     expect(options.html).toContain("&lt;Kilian&gt;");
     expect(options.html).toContain("&lt;b&gt;Bitte&lt;/b&gt; &amp; prüfen");
     expect(options.html).not.toContain("<script>");
+    expect(options.html).toContain("<v:roundrect");
+    expect(options.html).toContain("simpl<span");
+    expect(options.html).not.toMatch(/simpl<span[\s\S]+<v:roundrect/);
     expect(JSON.stringify(options)).not.toContain(configuration.SMTP_PASSWORD);
   });
 

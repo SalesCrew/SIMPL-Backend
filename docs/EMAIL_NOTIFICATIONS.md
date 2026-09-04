@@ -5,14 +5,20 @@ SIMPL sends email for five committed workspace events:
 - a new card;
 - a new comment;
 - a card marked as read;
-- a card marked as completed.
+- a card marked as completed;
 - a card is archived.
 
 The existing `private.publish_workspace_notification` function determines the recipients. It includes every active profile that can currently access the workspace and excludes the actor. The email outbox mirrors those per-recipient notification rows, so workspace isolation and pairwise NDA blocks are not reimplemented in application code.
 
 Before each delivery, `claim_email_outbox` checks the recipient's active state and workspace access again. If access was removed after the event, the job is discarded without revealing its content. Jobs use leases, retry with exponential backoff and stop after eight failed attempts. Terminal delivery records are retained for 30 days.
 
+Each person can open their avatar in the top-right corner and control email independently. The switches are hierarchical: the master switch controls all email, event switches control the five event types above, a workspace switch controls everything in that workspace, and project switches refine the projects inside it. Missing preference rows mean enabled, which preserves the existing delivery behaviour until somebody changes a switch. In-app bell notifications are separate and stay active.
+
+Preferences live in the owner-scoped `email_notification_settings`, `email_notification_workspace_preferences` and `email_notification_project_preferences` tables. Row Level Security allows a signed-in person to read and change only their own preferences for workspaces and projects they can access. The database checks the effective preference when it creates an outbox job and checks it again immediately before claiming the job, so disabling a category also suppresses matching work that was still waiting to send.
+
 Production uses Exchange Web Services with NTLM over HTTPS because outbound SMTP is unavailable on Railway plans below Pro. The worker verifies the mailbox with `GetFolder` and sends one message with `CreateItem` / `SendAndSaveCopy`. SMTP remains available as a configuration fallback. EWS sends from the authenticated Exchange mailbox; `SMTP_FROM` is used only by the SMTP transport and remains part of the shared rendering configuration.
+
+The production HTML uses the verified Outlook-safe SIMPL template: the brand sits in the first row of the rounded white card, Outlook desktop receives a fixed VML shell, and other clients receive the responsive rounded version. The text-only alternative contains the same event, card, workspace and timestamp information.
 
 ## Railway variables
 
