@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  cardActionUrl,
   createEventDrivenEmailWorker,
   deliverEmailBatch,
   emailNotificationsConfigured,
@@ -100,7 +101,9 @@ describe("workspace email delivery", () => {
     expect(options.messageId).toBe(
       `<simpl-${job.notification_id}@get-simpl.vercel.app>`,
     );
-    expect(options.text).toContain("In SIMPL öffnen: https://get-simpl.vercel.app");
+    const actionUrl = `https://get-simpl.vercel.app/?card=${job.card_id}`;
+    expect(options.text).toContain(`In SIMPL öffnen: ${actionUrl}`);
+    expect(options.html).toContain(`href="${actionUrl}"`);
     expect(options.html).toContain("&lt;Kilian&gt;");
     expect(options.html).toContain("&lt;b&gt;Bitte&lt;/b&gt; &amp; prüfen");
     expect(options.html).not.toContain("<script>");
@@ -108,6 +111,12 @@ describe("workspace email delivery", () => {
     expect(options.html).toContain("simpl<span");
     expect(options.html).not.toMatch(/simpl<span[\s\S]+<v:roundrect/);
     expect(JSON.stringify(options)).not.toContain(configuration.SMTP_PASSWORD);
+  });
+
+  it("builds a root fallback when an email no longer has a card", () => {
+    expect(cardActionUrl(configuration.APP_URL, null)).toBe(
+      "https://get-simpl.vercel.app/",
+    );
   });
 
   it("acknowledges a job only after SMTP accepts it", async () => {

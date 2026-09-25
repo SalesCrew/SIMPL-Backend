@@ -18,7 +18,7 @@ Preferences live in the owner-scoped `email_notification_settings`, `email_notif
 
 Production uses Exchange Web Services with NTLM over HTTPS because outbound SMTP is unavailable on Railway plans below Pro. The worker verifies the mailbox with `GetFolder` and sends one message with `CreateItem` / `SendAndSaveCopy`. SMTP remains available as a configuration fallback. EWS sends from the authenticated Exchange mailbox; `SMTP_FROM` is used only by the SMTP transport and remains part of the shared rendering configuration.
 
-The production HTML uses the verified Outlook-safe SIMPL template: the brand sits in the first row of the rounded white card, Outlook desktop receives a fixed VML shell, and other clients receive the responsive rounded version. The text-only alternative contains the same event, card, workspace and timestamp information.
+The production HTML uses the verified Outlook-safe SIMPL template: the brand sits in the first row of the rounded white card, Outlook desktop receives a fixed VML shell, and other clients receive the responsive rounded version. The text-only alternative contains the same event, card, workspace and timestamp information. Both versions link `In SIMPL öffnen` to `/?card=<card-id>`; after authentication the frontend verifies access, selects the card's workspace, opens its active or archived detail view, and consumes the URL parameter.
 
 ## Railway variables
 

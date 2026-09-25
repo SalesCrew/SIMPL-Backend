@@ -154,6 +154,15 @@ function compactBody(value: string, limit = 1200) {
   return body.length > limit ? `${body.slice(0, limit - 1).trimEnd()}…` : body;
 }
 
+export function cardActionUrl(appUrl: string, cardId: string | null) {
+  const url = new URL(appUrl);
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  if (cardId) url.searchParams.set("card", cardId);
+  return url.toString();
+}
+
 const eventCopy: Record<EmailJob["event_type"], {
   subject: string;
   headline: string;
@@ -203,7 +212,7 @@ export function mailOptionsForJob(
   const eventBody = job.event_type === "comment.created"
     ? compactBody(job.body)
     : "";
-  const appUrl = new URL(configuration.APP_URL).origin;
+  const appUrl = cardActionUrl(configuration.APP_URL, job.card_id);
   const eventDate = new Date(job.event_created_at);
   const occurredDate = new Intl.DateTimeFormat("de-AT", {
     day: "2-digit",
