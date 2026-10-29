@@ -23,6 +23,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { changeInitialPassword } from "./src/initial-password.js";
 import { moveCard } from "./src/card-moves.js";
+import { personalAnalyticsRouter } from "./src/personal-analytics.js";
 import {
   attachmentRouter,
   AttachmentError,
@@ -155,6 +156,7 @@ async function memberOnly(req: Request, res: Response, next: NextFunction) {
   });
 }
 app.post("/api/account/initial-password", authenticatedAccount, changeInitialPassword);
+app.use("/api/personal-analytics", memberOnly, personalAnalyticsRouter);
 app.post("/api/email/dispatch", memberOnly, (req, res, next) => {
   try {
     const { event_type: eventType } = z.object({
