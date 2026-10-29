@@ -73,7 +73,12 @@ app.use(
     exposedHeaders: ["Content-Disposition", "Content-Range", "Accept-Ranges"],
   }),
 );
-app.use(express.json({ limit: "16kb" }));
+const standardJson = express.json({ limit: "16kb" });
+app.use((req, res, next) => {
+  // Only the separately authenticated owner sync route accepts a larger body.
+  if (req.method === "POST" && /^\/api\/personal-analytics\/meetings\/sync\/?$/.test(req.path)) return next();
+  standardJson(req, res, next);
+});
 app.use((_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();

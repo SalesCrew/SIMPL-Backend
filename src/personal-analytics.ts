@@ -1,5 +1,7 @@
 import { Router, type NextFunction, type Request, type Response } from "express";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { ANALYSIS_LABEL_IDS } from "./meeting-context/labels.js";
+import { meetingContextRouter } from "./meeting-context/routes.js";
 
 // Verified against the single active public.profiles identity on 2026-10-29.
 // Role, display name, caller-supplied email and user_metadata confer no access.
@@ -15,7 +17,7 @@ function localStamp(value: string | null) {
   const p = Object.fromEntries(parts.formatToParts(new Date(value)).map(part => [part.type, part.value]));
   return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
 }
-export function personalAnalyticsPayload(cards: SourceCard[], projects: { id: string; name: string }[], labels: { id: string; name: string }[], snapshot: Date, workspaceName: string) {
+export function personalAnalyticsPayload(cards: SourceCard[], projects: { id: string; name: string; color?: string }[], labels: { id: string; name: string; color?: string }[], snapshot: Date, workspaceName: string) {
   const projectMap = new Map(projects.map(p => [p.id, p.name])), labelMap = new Map(labels.map(l => [l.id, l.name]));
   const retained = cards.filter(c => !c.deleted_at), snapshotAt = snapshot.toISOString(), snapshotLocal = localStamp(snapshotAt)!;
   const tasks = retained.map(card => {
@@ -24,7 +26,7 @@ export function personalAnalyticsPayload(cards: SourceCard[], projects: { id: st
     return {
       id: card.id, title: card.title, project: projectMap.get(card.project_id || "") || "Ohne Projekt",
       created_at: card.created_at, completed_at: effectiveCompletion, original_completed_at: card.completed_at,
-      archived_at: card.archived_at, deleted_at: null, labels: (card.label_ids || []).map(id => labelMap.get(id)).filter((name): name is string => Boolean(name)),
+      archived_at: card.archived_at, deleted_at: null, label_ids: card.label_ids || [], labels: (card.label_ids || []).map(id => labelMap.get(id)).filter((name): name is string => Boolean(name)),
       created_date: localStamp(card.created_at)?.slice(0, 10) || null,
       created_local: localStamp(card.created_at), finished_local: localStamp(effectiveCompletion),
       archive_date: localStamp(card.archived_at)?.slice(0, 10) || null,
@@ -35,7 +37,7 @@ export function personalAnalyticsPayload(cards: SourceCard[], projects: { id: st
   const validDates = tasks.flatMap(t => [t.created_at, t.completed_at]).filter((value): value is string => Boolean(value) && Number.isFinite(Date.parse(value!)) && Date.parse(value!) <= snapshot.getTime()).map(t => localStamp(t)!.slice(0, 10)).sort();
   const firstDate = validDates[0] || snapshotLocal.slice(0, 10);
   const meta = { workspace: workspaceName, snapshot_at: snapshotAt, snapshot_vienna: snapshotLocal, first_date: firstDate, last_date: snapshotLocal.slice(0, 10), total_cards: tasks.length, closed_cards: tasks.filter(t => t.completed_at).length, open_cards: tasks.filter(t => !t.completed_at).length, archive_fallback_cards: tasks.filter(t => t.completion_source === "archive-fallback").length };
-  return { meta, flow_meta: meta, flow_tasks: tasks, tasks: tasks.filter(t => t.completed_at), coverage: { start_date: firstDate, source: "earliest_available_date", confirmed_complete: false, note: "Gesamte verfügbare Historie einschließlich Trello-Importen. Frühere Ereignisse können unvollständig sein." } };
+  return { label_catalog: labels.map(label => ({ ...label, primary: ANALYSIS_LABEL_IDS.has(label.id) })), project_catalog: projects, meta, flow_meta: meta, flow_tasks: tasks, tasks: tasks.filter(t => t.completed_at), coverage: { start_date: firstDate, source: "earliest_available_date", confirmed_complete: false, note: "Gesamte verfügbare Historie einschließlich Trello-Importen. Frühere Ereignisse können unvollständig sein." } };
 }
 
 export const personalAnalyticsRouter = Router();
@@ -50,6 +52,7 @@ personalAnalyticsRouter.use((_req: Request, res: Response, next: NextFunction) =
   }
   next();
 });
+personalAnalyticsRouter.use("/meetings", meetingContextRouter);
 personalAnalyticsRouter.get("/access", (req, res) => {
   if (Object.keys(req.query).length) { res.status(400).json({ error: "Ungültige Anfrage." }); return; }
   res.json({ allowed: true });
@@ -64,8 +67,8 @@ personalAnalyticsRouter.get("/", async (req, res, next) => {
     if (workspace.error) throw workspace.error;
     if (!workspace.data) { res.status(404).json({ error: "Nicht gefunden." }); return; }
     const [projects, labels] = await Promise.all([
-      user.from("columns").select("id,name").eq("workspace_id", DEVELOPMENT_WORKSPACE).eq("kind", "project"),
-      user.from("labels").select("id,name").eq("workspace_id", DEVELOPMENT_WORKSPACE),
+      user.from("columns").select("id,name,color").eq("workspace_id", DEVELOPMENT_WORKSPACE).eq("kind", "project"),
+      user.from("labels").select("id,name,color").eq("workspace_id", DEVELOPMENT_WORKSPACE),
     ]);
     if (projects.error || labels.error) throw projects.error || labels.error;
     const cards: SourceCard[] = []; let after: string | null = null;
