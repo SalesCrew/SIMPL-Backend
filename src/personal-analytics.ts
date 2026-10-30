@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ANALYSIS_LABEL_IDS } from "./meeting-context/labels.js";
 import { meetingContextRouter } from "./meeting-context/routes.js";
+import { readCycle, NATIVE_REVIEW_FROM, NATIVE_REVIEW_FIRST_FULL_DAY } from "./read-cycle.js";
 
 // Verified against the single active public.profiles identity on 2026-10-29.
 // Role, display name, caller-supplied email and user_metadata confer no access.
@@ -9,8 +10,8 @@ export const PERSONAL_ANALYTICS_OWNER = "e68b62cd-06b3-4300-8a16-dc04e20ed75d";
 const DEVELOPMENT_WORKSPACE = "2bb0db3c-9ec4-4066-8f58-0a7712fb6325";
 const PAGE_SIZE = 500;
 const MAX_CARDS = 20_000;
-const CARD_FIELDS = "id,title,created_at,completed_at,archived_at,deleted_at,project_id,label_ids";
-type SourceCard = { id: string; title: string; created_at: string; completed_at: string | null; archived_at: string | null; deleted_at: string | null; project_id: string | null; label_ids: string[] | null };
+const CARD_FIELDS = "id,title,created_at,completed_at,reviewed_at,reviewed_by,archived_at,deleted_at,project_id,label_ids";
+type SourceCard = { id: string; title: string; created_at: string; completed_at: string | null; reviewed_at?: string | null; reviewed_by?: string | null; archived_at: string | null; deleted_at: string | null; project_id: string | null; label_ids: string[] | null };
 const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Vienna", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 function localStamp(value: string | null) {
   if (!value || !Number.isFinite(Date.parse(value))) return null;
@@ -26,6 +27,8 @@ export function personalAnalyticsPayload(cards: SourceCard[], projects: { id: st
     return {
       id: card.id, title: card.title, project: projectMap.get(card.project_id || "") || "Ohne Projekt",
       created_at: card.created_at, completed_at: effectiveCompletion, original_completed_at: card.completed_at,
+      reviewed_at: card.reviewed_at || null, reviewed_by_owner: card.reviewed_by === PERSONAL_ANALYTICS_OWNER,
+      ...readCycle(card, PERSONAL_ANALYTICS_OWNER, snapshot),
       archived_at: card.archived_at, deleted_at: null, label_ids: card.label_ids || [], labels: (card.label_ids || []).map(id => labelMap.get(id)).filter((name): name is string => Boolean(name)),
       created_date: localStamp(card.created_at)?.slice(0, 10) || null,
       created_local: localStamp(card.created_at), finished_local: localStamp(effectiveCompletion),
@@ -37,7 +40,8 @@ export function personalAnalyticsPayload(cards: SourceCard[], projects: { id: st
   const validDates = tasks.flatMap(t => [t.created_at, t.completed_at]).filter((value): value is string => Boolean(value) && Number.isFinite(Date.parse(value!)) && Date.parse(value!) <= snapshot.getTime()).map(t => localStamp(t)!.slice(0, 10)).sort();
   const firstDate = validDates[0] || snapshotLocal.slice(0, 10);
   const meta = { workspace: workspaceName, snapshot_at: snapshotAt, snapshot_vienna: snapshotLocal, first_date: firstDate, last_date: snapshotLocal.slice(0, 10), total_cards: tasks.length, closed_cards: tasks.filter(t => t.completed_at).length, open_cards: tasks.filter(t => !t.completed_at).length, archive_fallback_cards: tasks.filter(t => t.completion_source === "archive-fallback").length };
-  return { label_catalog: labels.map(label => ({ ...label, primary: ANALYSIS_LABEL_IDS.has(label.id) })), project_catalog: projects, meta, flow_meta: meta, flow_tasks: tasks, tasks: tasks.filter(t => t.completed_at), coverage: { start_date: firstDate, source: "earliest_available_date", confirmed_complete: false, note: "Gesamte verfügbare Historie einschließlich Trello-Importen. Frühere Ereignisse können unvollständig sein." } };
+  const read_cycle = { native_from: NATIVE_REVIEW_FROM, first_full_day: NATIVE_REVIEW_FIRST_FULL_DAY, basis: "Development Trello migration ledger", eligible_finished_cards: tasks.filter(t => t.read_to_finish_status === "valid").length, note: "Kalenderstunden vom letzten gespeicherten eigenen SIMPL-Lesestempel bis zum echten Fertig-Stempel. Importierte Lesestempel, ungelesene Karten und ungültige Reihenfolgen sind ausgeschlossen. Keine Arbeitszeit; erneutes Ungelesen/Gelesen überschreibt den Lesestempel." };
+  return { read_cycle, label_catalog: labels.map(label => ({ ...label, primary: ANALYSIS_LABEL_IDS.has(label.id) })), project_catalog: projects, meta, flow_meta: meta, flow_tasks: tasks, tasks: tasks.filter(t => t.completed_at), coverage: { start_date: firstDate, source: "earliest_available_date", confirmed_complete: false, note: "Gesamte verfügbare Historie einschließlich Trello-Importen. Frühere Ereignisse können unvollständig sein." } };
 }
 
 export const personalAnalyticsRouter = Router();

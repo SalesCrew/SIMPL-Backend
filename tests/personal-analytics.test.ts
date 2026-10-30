@@ -43,6 +43,7 @@ describe("private personal analytics boundary", () => {
     expect(result.status).toBe(200); expect(result.body.flow_tasks).toHaveLength(2); expect(result.body.tasks).toHaveLength(1); expect(result.body.meta.open_cards).toBe(1); expect(result.body.tasks[0].project).toBe("Projekt A"); expect(result.body.tasks[0].labels).toEqual(["Bug"]);
     for (const call of mocks.calls) expect(call.filters).toContainEqual([call.table === "workspaces" ? "id" : "workspace_id", WORKSPACE]);
     const cards = mocks.calls.find(c => c.table === "cards")!; expect(cards.filters).toContainEqual(["deleted_at", null]); expect(cards.projection).not.toMatch(/description|assignee|comments|\*/);
+    expect(cards.projection).toContain("reviewed_at,reviewed_by");
     expect(result.headers.vary).toContain("Authorization"); expect(result.headers["cache-control"]).toBe("private, no-store, max-age=0");
   });
   it("rejects client-selected identities/workspaces and unsupported routes", async () => {
@@ -60,6 +61,18 @@ describe("private personal analytics boundary", () => {
   });
 });
 describe("data contract without embedded private snapshots", () => {
+  it("exposes auditable cycle values without changing completion counts or using an archive fallback", () => {
+    const stamp = "2026-10-25T08:00:00Z";
+    const native = { ...card("native"), reviewed_at: stamp, reviewed_by: OWNER };
+    const fallback = { ...card("archived", null), reviewed_at: stamp, reviewed_by: OWNER, archived_at: "2026-10-26T10:00:00Z" };
+    const imported = { ...card("imported"), created_at: "2026-05-01T00:00:00Z", reviewed_at: "2026-08-01T00:00:00Z", reviewed_by: OWNER };
+    const p = personalAnalyticsPayload([native, fallback, imported], [], [], new Date("2026-10-30T10:00:00Z"), "Development");
+    expect(p.tasks).toHaveLength(3); expect(p.read_cycle.eligible_finished_cards).toBe(1);
+    expect(p.tasks[0].read_to_finish_hours).toBe(2); expect(p.tasks[0].reviewed_at).toBe(stamp);
+    expect(p.tasks[0]).not.toHaveProperty("reviewed_by");
+    expect(p.tasks[1].read_to_finish_hours).toBeNull(); expect(p.tasks[1].read_to_finish_status).toBe("no-finish");
+    expect(p.tasks[2].read_to_finish_status).toBe("imported-review");
+  });
   it("keeps archived completions once, open arrivals and labelled archive fallbacks", () => {
     const archived = { ...card("1"), archived_at: "2026-10-27T12:00:00Z" }, fallback = { ...card("2", null), archived_at: "2026-10-28T12:00:00Z" }, open = card("3", null), deleted = { ...card("4"), deleted_at: "2026-10-28T12:00:00Z" };
     const payload = personalAnalyticsPayload([archived, fallback, open, deleted], [{ id: "project", name: "A" }], [{ id: "bug", name: "Bug" }], new Date("2026-10-29T12:00:00Z"), "Development");

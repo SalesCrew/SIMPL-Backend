@@ -1,0 +1,11 @@
+# Native acknowledgement-to-finish duration
+
+The existing owner-only `/api/personal-analytics` response now selects `reviewed_at` and `reviewed_by` through the same verified user's RLS client. It returns the review stamp, an own-account boolean, a nullable elapsed-hour value and an explicit eligibility/exclusion status. The reviewer's raw ID is not added to the response. Authentication, workspace scope, pagination and cache boundaries are unchanged; no database schema, card state or privileged read was added.
+
+`read-cycle.ts` uses true `completed_at`, never an archive fallback or creation timestamp as the metric's end/start. Eligible pairs require an own-account review, valid creation/review/completion order and no future completion. Zero elapsed time is valid. Unread/open cards have no duration. The latest retained stamps are the only evidence: toggling unread/read can replace the start, and reopening/re-finishing can replace the end. This is elapsed calendar time including waiting, not tracked effort or task complexity.
+
+The cutoff is grounded in Development's existing private Trello migration ledger, inspected read-only on 30 October 2026: retained `source_kind=card` rows were imported at 31 August 19:39:15.867100–.869366 UTC. Historical imported review timestamps therefore cannot establish native acknowledgements. Only this new metric uses the conservative rounded-up boundary `2026-08-31T19:39:15.870Z`; all-time completion statistics retain every historical task. An old card re-acknowledged after import can qualify. The first fully observed Vienna day is 1 September; the first full 28-day window ends 28 September. No ID-pattern or inferred global migration filter is used.
+
+The audit at 30 October has 217 retained cards, 208 completed, 87 eligible native pairs. Of the completed cards, 95 have no review, 18 have imported review stamps and 8 have a native review after completion. The latest 28 complete Vienna days (2–29 October) contain 42 eligible pairs out of 46 completions: 2556.2050258333334 elapsed hours / 42 = 60.86202442460318 h/task. These are audit observations, never hardcoded result values.
+
+Backend verification: 116 tests and both TypeScript build checks, including native/imported/other-account/zero/invalid/reversed/future/DST stamps and existing API authorization tests. New fields are additive for old frontends.
