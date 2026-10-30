@@ -27,7 +27,9 @@ export const profileSchema = z.object({
     "butter",
     "sand",
   ]),
-  default_column_id: z.string().uuid().nullable(),
+  // Legacy clients may still send a project preference. Accounts belong to the
+  // workspace; never persist a project binding from an account request.
+  default_column_id: z.preprocess(() => null, z.null()),
   default_workspace_id: z.string().uuid().optional(),
   active: z.boolean(),
 });

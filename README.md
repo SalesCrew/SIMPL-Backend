@@ -32,6 +32,14 @@ Every active member with access to a workspace can archive one of its cards from
 
 New cards, comments, card acknowledgements, completed cards and archived cards can create one email job for every other active profile with current access to the workspace, subject to that person's master, event, workspace and project preferences. The existing private workspace notification writer remains the sole recipient authority, so actor exclusion and NDA isolation are identical for the bell and email. Each successful action calls the authenticated Railway dispatch API, which claims jobs with short leases, rechecks access and preferences, and sends each recipient separately through the configured EWS/NTLM-over-HTTPS or TLS SMTP transport. There is no repeating mail poller. Failed deliveries use event-tied backoff retries; a browser disconnect cannot remove a committed job. See `docs/EMAIL_NOTIFICATIONS.md` for configuration and operations.
 
+## Workspace accounts and retained projects
+
+Migration `20261030130614_workspace_users_and_retained_projects.sql` keeps accounts anchored to `profiles.default_workspace_id`. Legacy default-project input is normalized to null by both API validation and the database trigger. The Development backfill retains all 18 profile IDs, roles, active flags and home workspaces, clearing 14 old project preferences. Original mappings are preserved in `private.profile_workspace_binding_history`; that private table intentionally denies application access and has no RLS allow policy. No workspace/NDA access rule is broadened.
+
+The migration checks profile/access equality and fingerprints of Development cards, comments, attachments, notifications, edit sessions and meeting sections inside its transaction. All checks passed in production. No project is automatically hidden by the backfill.
+
+`archive_project(uuid)` is an admin-only, invoker-rights RPC that sets `columns.archived_at` instead of deleting the row. Existing card and meeting foreign keys remain intact. Active cards must leave the project column first. New card/move targets cannot point into hidden columns; completed tasks from removed projects reopen into In Arbeit. `sql/verify-workspace-users-retained-projects.sql` verifies normalization, retention, target guards and RPC authentication with every test write rolled back.
+
 ## Mandatory initial password change
 
 Every new profile receives an `account_security` row requiring a password change. `account_access_context()` exposes only the caller's gate status before workspace loading. Clients cannot forge the completion stamp. Restrictive RLS gates all business tables, and the API checks the same access context, including for admins. Existing workspace isolation policies are preserved.

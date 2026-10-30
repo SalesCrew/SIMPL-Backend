@@ -3,6 +3,17 @@ import request from "supertest";
 import app from "../server.js";
 import { canEditProfile, createProfileSchema } from "../src/validation.js";
 describe("Admin API access and validation", () => {
+  it("normalizes legacy project assignments to workspace-only accounts", () => {
+    const user = { name: "User", email: "member@example.invalid", password: "secure-password-long",
+      role: "mitarbeiter", color: "green", active: true,
+      default_workspace_id: "40000000-0000-4000-8000-000000000001" };
+    for (const value of [undefined, null, "50000000-0000-4000-8000-000000000001"]) {
+      const parsed = createProfileSchema.parse({ ...user, default_column_id: value });
+      expect(parsed.default_column_id).toBeNull();
+      expect(parsed.default_workspace_id).toBe(user.default_workspace_id);
+      expect(parsed.role).toBe("mitarbeiter");
+    }
+  });
   it("accepts a default workspace ID and rejects invalid assignments", () => {
     const profile = {
       name: "Workspace Test",
