@@ -61,6 +61,18 @@ describe("private personal analytics boundary", () => {
   });
 });
 describe("data contract without embedded private snapshots", () => {
+  it("offers the existing Inkognito label without inferring membership from a title or project", () => {
+    const inkognito = "91984a63-b73b-49f5-b34b-ca4ed773834c";
+    const tagged = { ...card("tagged"), label_ids: [inkognito] };
+    const namedOnly = { ...card("named-only"), title: "Inkognito", label_ids: [] };
+    const payload = personalAnalyticsPayload([tagged, namedOnly], [{ id: "project", name: "Inkognito" }],
+      [{ id: inkognito, name: "Inkognito", color: "sand" }, { id: "different-label", name: "Inkognito" }],
+      new Date("2026-11-09T10:00:00Z"), "Development");
+    expect(payload.label_catalog.find(label => label.id === inkognito)).toMatchObject({ primary: true, color: "sand" });
+    expect(payload.label_catalog.find(label => label.id === "different-label")?.primary).toBe(false);
+    expect(payload.tasks.filter(task => task.label_ids.includes(inkognito)).map(task => task.id)).toEqual(["tagged"]);
+    expect(payload.meta.closed_cards).toBe(2);
+  });
   it("exposes auditable cycle values without changing completion counts or using an archive fallback", () => {
     const stamp = "2026-10-25T08:00:00Z";
     const native = { ...card("native"), reviewed_at: stamp, reviewed_by: OWNER };
